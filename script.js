@@ -174,22 +174,42 @@ class PWAManager {
     }
 }
 
-// 通知機能
+// Android PWA対応通知機能
 class NotificationManager {
     constructor() {
-        this.isEnabled = localStorage.getItem('notificationEnabled') === 'true';
-        this.notificationTime = localStorage.getItem('notificationTime') || '07:00';
-        this.lastNotificationDate = localStorage.getItem('lastNotificationDate');
+        this.isEnabled = false;
+        this.notificationTime = '07:00';
+        this.lastNotificationDate = null;
+        this.serviceWorkerRegistration = null;
         this.init();
     }
 
-    init() {
+    async init() {
         const toggleBtn = document.getElementById('notificationToggle');
         const timeInput = document.getElementById('notificationTime');
 
+        // LocalStorageから設定を読み込み（可能な場合）
+        try {
+            this.isEnabled = localStorage.getItem('notificationEnabled') === 'true';
+            this.notificationTime = localStorage.getItem('notificationTime') || '07:00';
+            this.lastNotificationDate = localStorage.getItem('lastNotificationDate');
+        } catch (e) {
+            console.log('LocalStorage not available, using memory storage');
+        }
+
+        // Service Worker登録の待機
+        if ('serviceWorker' in navigator) {
+            try {
+                this.serviceWorkerRegistration = await navigator.serviceWorker.ready;
+                console.log('Service Worker ready for notifications');
+            } catch (error) {
+                console.log('Service Worker not ready:', error);
+            }
+        }
+
         // 初期状態の設定
         timeInput.value = this.notificationTime;
-        this.updateUI();
+        await this.updateUI();
 
         // イベントリスナー
         toggleBtn.addEventListener('click', () => this.toggleNotification());
@@ -197,54 +217,150 @@ class NotificationManager {
 
         // 定期チェックを開始（1分ごと）
         setInterval(() => this.checkNotificationTime(), 60000);
+
+        // 初期診断実行
+        this.runDiagnostics();
+    }
+
+    async runDiagnostics() {
+        console.log('=== 通知診断開始 ===');
+        console.log('User Agent:', navigator.userAgent);
+        console.log('Notification API available:', 'Notification' in window);
+        console.log('Service Worker available:', 'serviceWorker' in navigator);
+        console.log('Current notification permission:', Notification.permission);
+        console.log('PWA standalone mode:', window.matchMedia('(display-mode: standalone)').matches);
+        
+        if (this.serviceWorkerRegistration) {
+            console.log('Service Worker registration:', this.serviceWorkerRegistration);
+        }
+        
+        console.log('=== 診断終了 ===');
     }
 
     async toggleNotification() {
+        console.log('通知トグル開始, 現在の状態:', this.isEnabled);
+        
         if (!this.isEnabled) {
+            // 通知許可を求める
             if (!('Notification' in window)) {
                 alert('このブラウザは通知機能をサポートしていません');
                 return;
             }
 
-            const permission = await Notification.requestPermission();
-            if (permission === 'granted') {
-                this.isEnabled = true;
-                localStorage.setItem('notificationEnabled', 'true');
-                this.showTestNotification();
-            } else {
-                alert('通知が許可されませんでした。ブラウザの設定を確認してください。');
+            console.log('通知許可要求中...');
+            let permission;
+            
+            try {
+                // Android PWAでは異なる方法で許可を求める場合がある
+                if (this.serviceWorkerRegistration) {
+                    permission = await this.requestNotificationPermissionForPWA();
+                } else {
+                    permission = await Notification.requestPermission();
+                }
+                
+                console.log('通知許可結果:', permission);
+                
+                if (permission === 'granted') {
+                    this.isEnabled = true;
+                    this.saveSettings();
+                    console.log('通知が許可されました');
+                    await this.showTestNotification();
+                } else {
+                    console.log('通知が拒否されました:', permission);
+                    alert('通知が許可されませんでした。\n\nAndroid設定で確認してください：\n1. アプリ設定 > 通知 > 許可\n2. Chrome設定 > サイト設定 > 通知');
+                    return;
+                }
+            } catch (error) {
+                console.error('通知許可エラー:', error);
+                alert('通知許可でエラーが発生しました: ' + error.message);
                 return;
             }
         } else {
             this.isEnabled = false;
-            localStorage.setItem('notificationEnabled', 'false');
+            this.saveSettings();
+            console.log('通知が無効になりました');
         }
 
-        this.updateUI();
+        await this.updateUI();
+    }
+
+    async requestNotificationPermissionForPWA() {
+        // Android PWA用の通知許可要求
+        try {
+            // まず標準的な方法を試す
+            const permission = await Notification.requestPermission();
+            console.log('標準的な許可要求結果:', permission);
+            
+            if (permission === 'granted') {
+                return permission;
+            }
+            
+            // Service Worker経由で再試行
+            if (this.serviceWorkerRegistration) {
+                console.log('Service Worker経由で通知許可を確認中...');
+                // Service Workerが利用可能かチェック
+                const swPermission = await this.serviceWorkerRegistration.pushManager.permissionState({
+                    userVisibleOnly: true
+                });
+                console.log('Service Worker push permission:', swPermission);
+                
+                if (swPermission === 'granted') {
+                    return 'granted';
+                }
+            }
+            
+            return permission;
+        } catch (error) {
+            console.error('PWA通知許可エラー:', error);
+            throw error;
+        }
     }
 
     updateTime(time) {
         this.notificationTime = time;
-        localStorage.setItem('notificationTime', time);
+        this.saveSettings();
         this.updateUI();
     }
 
-    updateUI() {
-        const toggleBtn = document.getElementById('notificationToggle');
-        const status = document.getElementById('notificationStatus');
-
-        if (this.isEnabled) {
-            toggleBtn.textContent = '通知を無効にする';
-            toggleBtn.classList.add('disabled');
-            status.textContent = `通知が有効です（毎日 ${this.notificationTime} に通知）`;
-        } else {
-            toggleBtn.textContent = '通知を有効にする';
-            toggleBtn.classList.remove('disabled');
-            status.textContent = '通知が無効です';
+    saveSettings() {
+        try {
+            localStorage.setItem('notificationEnabled', this.isEnabled.toString());
+            localStorage.setItem('notificationTime', this.notificationTime);
+            if (this.lastNotificationDate) {
+                localStorage.setItem('lastNotificationDate', this.lastNotificationDate);
+            }
+        } catch (e) {
+            console.log('設定保存に失敗しました（メモリのみ）:', e);
         }
     }
 
-    showTestNotification() {
+    async updateUI() {
+        const toggleBtn = document.getElementById('notificationToggle');
+        const status = document.getElementById('notificationStatus');
+
+        // 現在の通知許可状態を確認
+        const currentPermission = Notification.permission;
+        console.log('UI更新時の通知許可:', currentPermission);
+
+        if (this.isEnabled && currentPermission === 'granted') {
+            toggleBtn.textContent = '通知を無効にする';
+            toggleBtn.classList.add('disabled');
+            status.innerHTML = `通知が有効です（毎日 ${this.notificationTime} に通知）<br><small>Android設定でも通知が許可されていることを確認してください</small>`;
+        } else {
+            toggleBtn.textContent = '通知を有効にする';
+            toggleBtn.classList.remove('disabled');
+            
+            if (currentPermission === 'denied') {
+                status.innerHTML = '通知が拒否されています<br><small>Android設定 > アプリ > 通知設定で許可してください</small>';
+            } else {
+                status.textContent = '通知が無効です';
+            }
+        }
+    }
+
+    async showTestNotification() {
+        console.log('テスト通知を送信中...');
+        
         const testGarbage = getTodayGarbage(new Date());
         let message = 'テスト通知です。';
         
@@ -255,15 +371,46 @@ class NotificationManager {
             message += '\n今日はゴミ出しの日ではありません。';
         }
 
-        new Notification('🗑️ ゴミ出しリマインダー', {
-            body: message,
-            icon: 'icon-192x192.png',
-            requireInteraction: true
-        });
+        try {
+            // Android PWAではService Worker経由の通知が推奨
+            if (this.serviceWorkerRegistration) {
+                console.log('Service Worker経由で通知送信中...');
+                await this.serviceWorkerRegistration.showNotification('🗑️ ゴミ出しリマインダー', {
+                    body: message,
+                    icon: './icon-192x192.png',
+                    badge: './icon-64x64.png',
+                    requireInteraction: true,
+                    tag: 'test-notification',
+                    vibrate: [200, 100, 200],
+                    actions: [
+                        { action: 'view', title: '確認' }
+                    ]
+                });
+                console.log('Service Worker通知送信完了');
+            } else {
+                // フォールバック: 標準通知
+                console.log('標準通知API使用中...');
+                const notification = new Notification('🗑️ ゴミ出しリマインダー', {
+                    body: message,
+                    icon: './icon-192x192.png',
+                    requireInteraction: true
+                });
+                
+                notification.onclick = function() {
+                    console.log('通知がクリックされました');
+                    notification.close();
+                };
+                
+                console.log('標準通知送信完了');
+            }
+        } catch (error) {
+            console.error('通知送信エラー:', error);
+            alert('通知送信でエラーが発生しました: ' + error.message);
+        }
     }
 
     checkNotificationTime() {
-        if (!this.isEnabled) return;
+        if (!this.isEnabled || Notification.permission !== 'granted') return;
 
         const now = new Date();
         const currentTime = now.getHours().toString().padStart(2, '0') + ':' + 
@@ -275,11 +422,13 @@ class NotificationManager {
             
             this.sendDailyNotification();
             this.lastNotificationDate = currentDate;
-            localStorage.setItem('lastNotificationDate', currentDate);
+            this.saveSettings();
         }
     }
 
-    sendDailyNotification() {
+    async sendDailyNotification() {
+        console.log('日次通知送信中...');
+        
         const today = new Date();
         const todayGarbage = getTodayGarbage(today);
         
@@ -293,11 +442,27 @@ class NotificationManager {
             message = '今日はゴミ出しの日ではありません。';
         }
 
-        new Notification(title, {
-            body: message,
-            icon: 'icon-192x192.png',
-            requireInteraction: true
-        });
+        try {
+            if (this.serviceWorkerRegistration) {
+                await this.serviceWorkerRegistration.showNotification(title, {
+                    body: message,
+                    icon: './icon-192x192.png',
+                    badge: './icon-64x64.png',
+                    requireInteraction: true,
+                    tag: 'daily-reminder',
+                    vibrate: [200, 100, 200]
+                });
+            } else {
+                new Notification(title, {
+                    body: message,
+                    icon: './icon-192x192.png',
+                    requireInteraction: true
+                });
+            }
+            console.log('日次通知送信完了');
+        } catch (error) {
+            console.error('日次通知送信エラー:', error);
+        }
     }
 }
 
