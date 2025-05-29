@@ -1,5 +1,5 @@
 // =================================================================================
-// ゴミ出しカレンダー アプリケーション スクリプト (改善版)
+// ゴミ出しカレンダー アプリケーション スクリプト (月1自動チェック機能付き)
 // =================================================================================
 
 // ---------------------------------------------------------------------------------
@@ -19,7 +19,6 @@ class PerfectScheduleFetcher {
     constructor() {
         this.aridaCityUrl = 'https://www.city.arida.lg.jp/kurashi/gomikankyo/gomibunbetsu/1000951/1000954.html';
         
-        // 改善点：より安定したプロキシを選定し、並列リクエストで最速のものを利用
         this.proxyUrls = [
             'https://corsproxy.io/?',
             'https://api.allorigins.win/get?url='
@@ -33,7 +32,6 @@ class PerfectScheduleFetcher {
         };
     }
 
-    // HTMLコンテンツを取得（複数プロキシで並列試行）
     async fetchHtmlContent() {
         console.log('📡 HTMLコンテンツ取得中 (並列実行)...');
 
@@ -46,7 +44,6 @@ class PerfectScheduleFetcher {
                 if (!response.ok) {
                     throw new Error(`プロキシエラー: ${response.status} at ${proxyUrl}`);
                 }
-                // alloriginsはJSONでラップされているため、中身を取り出す
                 if (proxyUrl.includes('allorigins')) {
                     const data = await response.json();
                     if (data.contents) {
@@ -59,7 +56,6 @@ class PerfectScheduleFetcher {
         });
 
         try {
-            // 改善点：Promise.anyを使い、一番速く成功したプロキシの結果を採用
             const htmlContent = await Promise.any(fetchPromises);
             console.log('✅ HTML取得成功 (一番速いプロキシを使用)');
             return htmlContent;
@@ -69,24 +65,21 @@ class PerfectScheduleFetcher {
         }
     }
 
-    // HTMLからスケジュール抽出（ブラウザ内蔵DOMParser使用）
     extractScheduleFromHtml(htmlContent) {
         console.log('🔍 HTML解析中...');
         const parser = new DOMParser();
         const doc = parser.parseFromString(htmlContent, 'text/html');
 
-        // 改善点：キャプションから年を動的に取得
         let currentYear;
         const caption = doc.querySelector('table.gomi caption');
         if (caption) {
-            const captionText = caption.textContent; // 例: "令和7年4月"
+            const captionText = caption.textContent;
             const reiwaMatch = captionText.match(/令和(\d+|元)年/);
             if (reiwaMatch) {
                 const reiwaYear = reiwaMatch[1] === '元' ? 1 : parseInt(reiwaMatch[1], 10);
-                currentYear = reiwaYear + 2018; // 令和元年 = 2019年
+                currentYear = reiwaYear + 2018;
             }
         }
-        // 年が取得できなかった場合のフォールバック
         if (!currentYear) {
             currentYear = new Date().getFullYear();
             console.warn(`HTMLから年を特定できませんでした。現在の年(${currentYear})を使用します。`);
@@ -116,7 +109,6 @@ class PerfectScheduleFetcher {
 
             const rows = table.querySelectorAll('tr');
             rows.forEach(row => {
-                // ヘッダー行（thタグを含む行）はスキップ
                 if (row.querySelector('th')) return;
 
                 const cells = row.querySelectorAll('td');
@@ -138,8 +130,6 @@ class PerfectScheduleFetcher {
                         }
                     });
 
-                    // 通常のスケジュールと異なる場合のみ特別日程として記録
-                    // (祝日で収集なしの場合も含む)
                     const normalGarbage = this.getNormalGarbageForDate(new Date(dateString));
                     if (!this.arraysEqual(garbageTypes, normalGarbage)) {
                         scheduleData.specialDates.set(dateString, garbageTypes);
@@ -152,7 +142,6 @@ class PerfectScheduleFetcher {
         return scheduleData;
     }
     
-    // 通常の収集日程を取得（比較用）
     getNormalGarbageForDate(date) {
         const dayOfWeek = date.getDay();
         const weekOfMonth = getWeekOfMonth(date);
@@ -173,7 +162,6 @@ class PerfectScheduleFetcher {
         return garbage;
     }
 
-    // 配列比較
     arraysEqual(a, b) {
         if (a.length !== b.length) return false;
         const aTypes = a.map(g => g.type).sort();
@@ -181,7 +169,6 @@ class PerfectScheduleFetcher {
         return aTypes.every((val, index) => val === bTypes[index]);
     }
 
-    // デフォルトスケジュール (エラー発生時に使用)
     getDefaultSchedule() {
         return {
             year: new Date().getFullYear(),
@@ -191,7 +178,6 @@ class PerfectScheduleFetcher {
         };
     }
     
-    // 取得したスケジュールをマネージャーに渡して更新
     updateSpecialSchedule(scheduleData) {
         if (scheduleData && scheduleData.specialDates) {
             scheduleData.specialDates.forEach((types, date) => {
@@ -214,22 +200,19 @@ class SpecialScheduleManager {
         this.specialDates = new Map();
         this.fetcher = new PerfectScheduleFetcher();
         
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        // ★ ここに、ステップ1でコピーしたGistの「Raw」URLを貼り付けてください ★
-        // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         this.gistFallbackUrl = 'https://gist.githubusercontent.com/realkinglion/4859d37c601e6f3b3a07cc049356234b/raw/a3834ed438c03cfd9b7d83d021f7bd142ca7429a/schedule.json';
         
         this.loadSpecialDates();
     }
 
-    // メインの取得処理（プロキシ → Gistフォールバック）
     async fetchLatestSchedule() {
         try {
-            // ステップ1：プロキシ経由での自動取得を試みる
             const htmlContent = await this.fetcher.fetchHtmlContent();
             const scheduleData = this.fetcher.extractScheduleFromHtml(htmlContent);
             this.fetcher.updateSpecialSchedule(scheduleData);
             console.log('✅ プロキシ経由での取得に成功');
+            // ★★★★★ 成功時に最終取得日時を記録 ★★★★★
+            localStorage.setItem('lastSuccessfulFetch', Date.now().toString());
             return scheduleData;
         } catch (error) {
             console.warn('⚠️ プロキシ経由での取得に失敗。Gistからのフォールバックを試みます。', error);
@@ -238,12 +221,10 @@ class SpecialScheduleManager {
                 throw new Error('Gist URL is not configured.');
             }
             try {
-                // ステップ2：Gistからの取得を試みる
                 const response = await fetch(this.gistFallbackUrl);
                 if (!response.ok) throw new Error('Gistサーバーからの応答が不正です');
                 const gistData = await response.json();
                 
-                // Gistのデータをアプリの形式に変換
                 const specialDatesMap = new Map();
                 if (gistData.specialDates) {
                     Object.entries(gistData.specialDates).forEach(([date, data]) => {
@@ -255,21 +236,21 @@ class SpecialScheduleManager {
                     year: gistData.year,
                     specialDates: specialDatesMap,
                     source: gistData.source,
-                    confidence: 0.90 // 手動更新なので信頼性は高い
+                    confidence: 0.90
                 };
 
                 this.fetcher.updateSpecialSchedule(scheduleData);
                 console.log('✅ Gistからのフォールバック取得に成功');
+                // ★★★★★ 成功時に最終取得日時を記録 ★★★★★
+                localStorage.setItem('lastSuccessfulFetch', Date.now().toString());
                 return scheduleData;
 
             } catch (fallbackError) {
                 console.error('❌ Gistからのフォールバックも失敗しました。', fallbackError);
-                throw fallbackError; // エラーを投げてUIに失敗を伝える
+                throw fallbackError;
             }
         }
     }
-
-    // --- 以下、既存のメソッド群 (変更なし) ---
 
     loadSpecialDates() {
         try {
@@ -281,9 +262,7 @@ class SpecialScheduleManager {
                 });
                 console.log('特別日程を読み込みました:', this.specialDates.size, '件');
             }
-        } catch (e) {
-            console.log('特別日程の読み込みに失敗:', e);
-        }
+        } catch (e) { console.log('特別日程の読み込みに失敗:', e); }
         this.setDefaultHolidaySchedule();
     }
 
@@ -324,13 +303,9 @@ class SpecialScheduleManager {
     saveSpecialDates() {
         try {
             const data = {};
-            this.specialDates.forEach((value, key) => {
-                data[key] = value;
-            });
+            this.specialDates.forEach((value, key) => { data[key] = value; });
             localStorage.setItem('specialGarbageDates', JSON.stringify(data));
-        } catch (e) {
-            console.log('特別日程の保存に失敗:', e);
-        }
+        } catch (e) { console.log('特別日程の保存に失敗:', e); }
     }
 
     getSpecialSchedule(date) {
@@ -362,9 +337,7 @@ class SpecialScheduleManager {
 
 // ---------------------------------------------------------------------------------
 // 4. UI更新 & スケジュール判定ロジック
-// (このセクションは大きな変更なし)
 // ---------------------------------------------------------------------------------
-
 function getWeekOfMonth(date) {
     const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
     const firstWeekday = firstDay.getDay();
@@ -375,7 +348,6 @@ function getWeekOfMonth(date) {
 function getTodayGarbage(date) {
     const specialSchedule = specialScheduleManager.getSpecialSchedule(date);
     if (specialSchedule !== null) {
-        console.log('特別日程が適用されました:', specialSchedule);
         return specialSchedule;
     }
 
@@ -445,23 +417,30 @@ function updateSpecialScheduleDisplay() {
     const container = document.getElementById('specialScheduleList');
     if (!container) return;
 
-    const specialDates = specialScheduleManager.getAllSpecialDates()
-        .filter(item => new Date(item.date) >= new Date(new Date().toDateString())) // 今日以降の日付
-        .sort((a, b) => new Date(a.date) - new Date(b.date))
-        .slice(0, 8); 
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
 
-    if (specialDates.length > 0) {
-        container.innerHTML = '<h4>📅 直近の特別日程</h4>' + 
-            specialDates.map(item => {
-                const date = new Date(item.date);
-                const dateStr = date.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric', weekday: 'short' });
-                const typeNames = item.types.map(t => t.name).join('、') || '収集なし';
-                const userIcon = item.userSet ? '👤' : '🤖';
-                const noteText = item.note ? ` (${item.note})` : '';
-                return `<div class="special-date-item">${userIcon} ${dateStr}: ${typeNames}${noteText}</div>`;
-            }).join('');
+    const specialDatesThisMonth = specialScheduleManager.getAllSpecialDates()
+        .filter(item => {
+            const itemDate = new Date(item.date);
+            if (isNaN(itemDate.getTime())) return false;
+            return itemDate.getFullYear() === currentYear && itemDate.getMonth() === currentMonth;
+        })
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    container.innerHTML = '<h4>今月の特別日程</h4>';
+    if (specialDatesThisMonth.length > 0) {
+        container.innerHTML += specialDatesThisMonth.map(item => {
+            const date = new Date(item.date);
+            const dateStr = date.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric', weekday: 'short' });
+            const typeNames = item.types.map(t => t.name).join('、') || '収集なし';
+            const userIcon = item.userSet ? '👤' : '🤖';
+            const noteText = item.note ? ` (${item.note})` : '';
+            return `<div class="special-date-item">${userIcon} ${dateStr}: ${typeNames}${noteText}</div>`;
+        }).join('');
     } else {
-        container.innerHTML = '<h4>📅 特別日程</h4><p>現在、登録されている直近の特別日程はありません</p>';
+        container.innerHTML += '<p>今月は変則的な収集スケジュールはありません。</p>';
     }
 }
 
@@ -489,9 +468,7 @@ function createNotificationOptions(title, body, tag, includeActions = true) {
 
 // ---------------------------------------------------------------------------------
 // 5. PWA機能 & 通知機能
-// (このセクションは大きな変更なし)
 // ---------------------------------------------------------------------------------
-
 class PWAManager {
     constructor() {
         this.deferredPrompt = null;
@@ -653,7 +630,6 @@ class NotificationManager {
         this.sendMessageToServiceWorker({ type: 'TEST_NOTIFICATION' });
     }
     
-    // Service Workerに毎日のチェックを依頼
     scheduleDailyCheck() {
         console.log('Scheduling daily check with Service Worker.');
         this.sendMessageToServiceWorker({
@@ -666,9 +642,7 @@ class NotificationManager {
 
 // ---------------------------------------------------------------------------------
 // 6. 特別日程管理UI
-// (このセクションは大きな変更なし)
 // ---------------------------------------------------------------------------------
-
 class SpecialScheduleUI {
     constructor(manager) {
         this.manager = manager;
@@ -681,11 +655,11 @@ class SpecialScheduleUI {
         scheduleSection.className = 'schedule-management-section';
         scheduleSection.innerHTML = `
             <div class="schedule-management">
-                <h3>🎯 自動取得＆手動管理</h3>
+                <h3>📅 特別日程の確認</h3>
                 <div class="schedule-controls">
                     <button class="schedule-button perfect-fetch" id="perfectFetchBtn">🔄 最新情報を取得</button>
                     <button class="schedule-button" id="addSpecialDateBtn">👤 手動で追加</button>
-                    <button class="schedule-button" id="viewScheduleBtn">📋 一覧表示</button>
+                    <button class="schedule-button" id="viewScheduleBtn">📋 全日程を一覧表示</button>
                 </div>
                 <div id="fetchStatus" class="fetch-status" style="min-height: 2em;"></div>
                 <div id="specialScheduleList" class="special-schedule-list"></div>
@@ -788,7 +762,7 @@ class SpecialScheduleUI {
         dialog.className = 'schedule-list-dialog';
         dialog.innerHTML = `
             <div class="dialog-content">
-                <h4>特別日程一覧</h4>
+                <h4>登録済みの全特別日程</h4>
                 <div class="schedule-list">
                     ${allDates.map(item => {
                         const date = new Date(item.date);
@@ -815,8 +789,8 @@ class SpecialScheduleUI {
                 if (confirm(`${dateToDelete}の特別日程を削除しますか？`)) {
                     this.manager.removeSpecialDate(dateToDelete);
                     dialog.remove();
-                    this.showScheduleList(); // リストを再表示
-                    updateSpecialScheduleDisplay(); // メイン画面も更新
+                    this.showScheduleList();
+                    updateSpecialScheduleDisplay();
                 }
             };
         });
@@ -838,10 +812,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const notificationManager = new NotificationManager();
     
     updateCalendar();
-    setInterval(updateCalendar, 60000); // 1分ごとに時計とゴミ出しを更新
+    setInterval(updateCalendar, 60000);
     
-    // アプリ起動時に一度だけ自動取得を試みる
-    setTimeout(() => {
-        specialScheduleUI.performPerfectFetch();
-    }, 1000); // 1秒後
+    // ★★★★★ ここが今回の修正点 ★★★★★
+    // 擬似的な月1自動チェック機能
+    try {
+        const lastFetchTimestamp = localStorage.getItem('lastSuccessfulFetch');
+        const oneMonthInMs = 30 * 24 * 60 * 60 * 1000; // 30日をミリ秒で表現
+        
+        // 最終取得日時がない、または30日以上経過している場合
+        if (!lastFetchTimestamp || (Date.now() - parseInt(lastFetchTimestamp)) > oneMonthInMs) {
+            console.log('最終取得から1ヶ月以上経過したため、自動更新を開始します。');
+            // 少し遅延させて実行し、メインの描画を妨げないようにする
+            setTimeout(() => {
+                specialScheduleUI.performPerfectFetch();
+            }, 2000); // 2秒後に実行
+        } else {
+            console.log('最終取得から1ヶ月以内です。自動更新はスキップします。');
+        }
+    } catch(e) {
+        console.error("自動チェック処理でエラーが発生しました:", e);
+    }
 });
