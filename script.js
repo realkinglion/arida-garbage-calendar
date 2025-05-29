@@ -181,6 +181,7 @@ class NotificationManager {
         this.notificationTime = '07:00';
         this.lastNotificationDate = null;
         this.serviceWorkerRegistration = null;
+        this.heartbeatInterval = null;
         this.init();
     }
 
@@ -215,8 +216,11 @@ class NotificationManager {
         toggleBtn.addEventListener('click', () => this.toggleNotification());
         timeInput.addEventListener('change', (e) => this.updateTime(e.target.value));
 
-        // 定期チェックを開始（1分ごと）
-        setInterval(() => this.checkNotificationTime(), 60000);
+        // Android対応: アプリがアクティブな間の定期チェック
+        this.startHeartbeat();
+        
+        // Service Workerとの通信チャネル確立
+        await this.setupServiceWorkerCommunication();
 
         // 初期診断実行
         this.runDiagnostics();
@@ -235,6 +239,52 @@ class NotificationManager {
         }
         
         console.log('=== 診断終了 ===');
+    }
+
+    // Android対応: 定期的な生存確認
+    startHeartbeat() {
+        // 既存のheartbeatがあれば停止
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+        }
+        
+        // 1分ごとにService Workerにメッセージ送信
+        this.heartbeatInterval = setInterval(() => {
+            this.sendMessageToServiceWorker({
+                type: 'HEARTBEAT',
+                timestamp: Date.now()
+            });
+            
+            // 通知時間チェックも実行
+            this.checkNotificationTime();
+        }, 60000);
+        
+        console.log('Heartbeat started');
+    }
+
+    // Service Workerとの通信設定
+    async setupServiceWorkerCommunication() {
+        if ('serviceWorker' in navigator) {
+            try {
+                this.serviceWorkerRegistration = await navigator.serviceWorker.ready;
+                
+                // Service Workerからのメッセージ受信
+                navigator.serviceWorker.addEventListener('message', (event) => {
+                    console.log('Message from Service Worker:', event.data);
+                });
+                
+                console.log('Service Worker communication established');
+            } catch (error) {
+                console.error('Service Worker communication failed:', error);
+            }
+        }
+    }
+
+    // Service Workerにメッセージ送信
+    sendMessageToServiceWorker(message) {
+        if (this.serviceWorkerRegistration && this.serviceWorkerRegistration.active) {
+            this.serviceWorkerRegistration.active.postMessage(message);
+        }
     }
 
     async toggleNotification() {
@@ -359,53 +409,28 @@ class NotificationManager {
     }
 
     async showTestNotification() {
-        console.log('テスト通知を送信中...');
+        console.log('テスト通知送信中...');
         
-        const testGarbage = getTodayGarbage(new Date());
-        let message = 'テスト通知です。';
+        // Service Workerに通知指示を送信
+        this.sendMessageToServiceWorker({
+            type: 'TEST_NOTIFICATION'
+        });
         
-        if (testGarbage.length > 0) {
-            const garbageNames = testGarbage.map(g => g.name).join('、');
-            message += `\n今日は${garbageNames}の日です！`;
-        } else {
-            message += '\n今日はゴミ出しの日ではありません。';
-        }
-
+        // 直接通知も送信（フォールバック）
         try {
-            // Android PWAではService Worker経由の通知が推奨
             if (this.serviceWorkerRegistration) {
-                console.log('Service Worker経由で通知送信中...');
-                await this.serviceWorkerRegistration.showNotification('🗑️ ゴミ出しリマインダー', {
-                    body: message,
+                await this.serviceWorkerRegistration.showNotification('🗑️ テスト通知', {
+                    body: 'Android PWA通知テスト中...',
                     icon: './icon-192x192.png',
                     badge: './icon-64x64.png',
                     requireInteraction: true,
                     tag: 'test-notification',
                     vibrate: [200, 100, 200],
-                    actions: [
-                        { action: 'view', title: '確認' }
-                    ]
+                    timestamp: Date.now()
                 });
-                console.log('Service Worker通知送信完了');
-            } else {
-                // フォールバック: 標準通知
-                console.log('標準通知API使用中...');
-                const notification = new Notification('🗑️ ゴミ出しリマインダー', {
-                    body: message,
-                    icon: './icon-192x192.png',
-                    requireInteraction: true
-                });
-                
-                notification.onclick = function() {
-                    console.log('通知がクリックされました');
-                    notification.close();
-                };
-                
-                console.log('標準通知送信完了');
             }
         } catch (error) {
             console.error('通知送信エラー:', error);
-            alert('通知送信でエラーが発生しました: ' + error.message);
         }
     }
 
@@ -417,9 +442,12 @@ class NotificationManager {
                          now.getMinutes().toString().padStart(2, '0');
         const currentDate = now.toDateString();
 
+        console.log('時間チェック:', currentTime, '設定時間:', this.notificationTime);
+
         if (currentTime === this.notificationTime && 
             this.lastNotificationDate !== currentDate) {
             
+            console.log('通知時間になりました！');
             this.sendDailyNotification();
             this.lastNotificationDate = currentDate;
             this.saveSettings();
@@ -429,6 +457,12 @@ class NotificationManager {
     async sendDailyNotification() {
         console.log('日次通知送信中...');
         
+        // Service Workerに通知指示
+        this.sendMessageToServiceWorker({
+            type: 'CHECK_GARBAGE_NOW'
+        });
+        
+        // 直接通知も送信（確実性向上）
         const today = new Date();
         const todayGarbage = getTodayGarbage(today);
         
@@ -450,18 +484,29 @@ class NotificationManager {
                     badge: './icon-64x64.png',
                     requireInteraction: true,
                     tag: 'daily-reminder',
-                    vibrate: [200, 100, 200]
-                });
-            } else {
-                new Notification(title, {
-                    body: message,
-                    icon: './icon-192x192.png',
-                    requireInteraction: true
+                    vibrate: [200, 100, 200],
+                    timestamp: Date.now()
                 });
             }
             console.log('日次通知送信完了');
         } catch (error) {
             console.error('日次通知送信エラー:', error);
+        }
+    }
+
+    // アプリ終了時の処理
+    onAppClose() {
+        if (this.heartbeatInterval) {
+            clearInterval(this.heartbeatInterval);
+        }
+        
+        // Service Workerに通知スケジュール指示
+        if (this.isEnabled) {
+            this.sendMessageToServiceWorker({
+                type: 'SCHEDULE_NOTIFICATION',
+                time: this.notificationTime,
+                message: 'ゴミ出し確認'
+            });
         }
     }
 }
@@ -472,3 +517,13 @@ setInterval(updateCalendar, 60000);
 
 const pwaManager = new PWAManager();
 const notificationManager = new NotificationManager();
+
+// グローバルに設定（デバッグ用）
+window.notificationManager = notificationManager;
+
+// ページ離脱時の処理
+window.addEventListener('beforeunload', () => {
+    if (window.notificationManager) {
+        window.notificationManager.onAppClose();
+    }
+});
