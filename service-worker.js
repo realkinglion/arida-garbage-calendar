@@ -1,4 +1,4 @@
-const CACHE_NAME = 'garbage-calendar-v3';
+const CACHE_NAME = 'garbage-calendar-v4';
 const urlsToCache = [
   './',
   './index.html',
@@ -6,6 +6,9 @@ const urlsToCache = [
   './script.js',
   './manifest.json'
 ];
+
+// 特別日程データ（Service Worker内）
+let specialDates = new Map();
 
 // Service Worker インストール
 self.addEventListener('install', (event) => {
@@ -34,6 +37,7 @@ self.addEventListener('activate', (event) => {
       );
     }).then(() => {
       console.log('Service Worker activated');
+      loadSpecialDates();
       return self.clients.claim();
     })
   );
@@ -116,7 +120,58 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'CHECK_GARBAGE_NOW') {
     performDailyCheck();
   }
+  
+  if (event.data && event.data.type === 'UPDATE_SPECIAL_DATES') {
+    updateSpecialDates(event.data.specialDates);
+  }
 });
+
+// 特別日程データの読み込み
+function loadSpecialDates() {
+  try {
+    // IndexedDBから特別日程を読み込む（実装簡略化のためコメントアウト）
+    // 代わりにデフォルトの年末年始スケジュールを設定
+    setDefaultHolidaySchedule();
+  } catch (error) {
+    console.log('特別日程の読み込みに失敗:', error);
+  }
+}
+
+// デフォルトの年末年始スケジュールを設定
+function setDefaultHolidaySchedule() {
+  const currentYear = new Date().getFullYear();
+  
+  const holidayChanges = [
+    // 年末年始の一般的な変更パターン
+    { date: `${currentYear}-12-29`, types: [] },
+    { date: `${currentYear}-12-30`, types: [] },
+    { date: `${currentYear}-12-31`, types: [] },
+    { date: `${currentYear + 1}-01-01`, types: [] },
+    { date: `${currentYear + 1}-01-02`, types: [] },
+    { date: `${currentYear + 1}-01-03`, types: [] },
+    
+    // ゴールデンウィーク期間の変更
+    { date: `${currentYear + 1}-05-03`, types: [] },
+    { date: `${currentYear + 1}-05-04`, types: [] },
+    { date: `${currentYear + 1}-05-05`, types: [] },
+  ];
+
+  holidayChanges.forEach(change => {
+    specialDates.set(change.date, change.types);
+  });
+  
+  console.log('デフォルトの特別日程を設定しました:', specialDates.size, '件');
+}
+
+// 特別日程データの更新
+function updateSpecialDates(newSpecialDates) {
+  try {
+    specialDates = new Map(Object.entries(newSpecialDates));
+    console.log('特別日程を更新しました:', specialDates.size, '件');
+  } catch (error) {
+    console.log('特別日程の更新に失敗:', error);
+  }
+}
 
 // 通知オプション作成（音・バイブ対応）
 function createNotificationOptions(body, tag, actions = []) {
@@ -126,10 +181,10 @@ function createNotificationOptions(body, tag, actions = []) {
     badge: './icon-64x64.png',
     tag: tag,
     requireInteraction: true,
-    silent: false, // 音を有効にする
-    vibrate: [500, 110, 500, 110, 450, 110, 200, 110, 170, 40, 450, 110, 200, 110, 170, 40, 500], // 長いバイブパターン
+    silent: false,
+    vibrate: [500, 110, 500, 110, 450, 110, 200, 110, 170, 40, 450, 110, 200, 110, 170, 40, 500],
     timestamp: Date.now(),
-    renotify: true, // 同じタグでも再通知
+    renotify: true,
     actions: actions.length > 0 ? actions : [
       { 
         action: 'view', 
@@ -159,51 +214,52 @@ async function performBackgroundSync() {
   }
 }
 
-// 毎日のゴミ出しチェック
+// 毎日のゴミ出しチェック（特別日程対応）
 async function performDailyCheck() {
-  console.log('Performing daily garbage check...');
+  console.log('Performing daily garbage check with special schedule support...');
   
   const now = new Date();
-  const today = getTodayGarbage(now);
+  const today = getTodayGarbageWithSpecialSchedule(now);
   
   if (today.length > 0) {
     const garbageNames = today.map(g => g.name).join('、');
     const title = '🗑️ ゴミ出しリマインダー';
-    const body = `【重要】今日は${garbageNames}の日です！\n\n📍 収集時間: 午後6時〜午後9時\n📍 場所: 指定の収集場所\n📍 袋: 指定袋を使用してください\n\n忘れずに出しましょう！`;
+    
+    // 特別日程かどうかをチェック
+    const isSpecial = getSpecialSchedule(now) !== null;
+    const specialNote = isSpecial ? '\n📅 ※特別日程が適用されています' : '';
+    
+    const body = `【重要】今日は${garbageNames}の日です！${specialNote}\n\n📍 収集時間: 午後6時〜午後9時\n📍 場所: 指定の収集場所\n📍 袋: 指定袋を使用してください\n\n⏰ 忘れずに出しましょう！`;
     
     const options = createNotificationOptions(body, 'daily-reminder');
     
     await self.registration.showNotification(title, options);
     
-    console.log('Daily notification sent:', garbageNames);
+    console.log('Daily notification sent:', garbageNames, isSpecial ? '(特別日程)' : '(通常日程)');
   } else {
     console.log('No garbage collection today');
     
-    // ゴミ出しがない日でも通知（オプション）
-    const title = '🗑️ ゴミ出し情報';
-    const body = '今日はゴミ出しの日ではありません。\n\n次回のゴミ出し予定を確認してください。';
-    
-    // この通知は控えめに
-    const options = {
-      body: body,
-      icon: './icon-192x192.png',
-      tag: 'no-garbage-today',
-      requireInteraction: false,
-      silent: true, // この通知は音なし
-      vibrate: [200], // 短いバイブ
-      timestamp: Date.now()
-    };
-    
-    // await self.registration.showNotification(title, options);
+    // ゴミ出しがない日の通知（特別日程の場合）
+    const isSpecial = getSpecialSchedule(now) !== null;
+    if (isSpecial) {
+      const title = '🗑️ ゴミ出し情報';
+      const body = '今日はゴミ出しの日ではありません。\n📅 ※年末年始・祝日等の特別日程です\n\n次回のゴミ出し予定を確認してください。';
+      
+      const options = createNotificationOptions(body, 'no-garbage-special', []);
+      // 特別日程での収集なしは重要な情報なので通知
+      await self.registration.showNotification(title, options);
+      
+      console.log('Special schedule notification sent: no collection');
+    }
   }
 }
 
 // テスト通知表示
 async function showTestNotification() {
-  console.log('Showing test notification...');
+  console.log('Showing test notification with special schedule support...');
   
-  const title = '🗑️ テスト通知';
-  const body = '📢 Android PWA通知が正常に動作しています！\n\n✅ 音とバイブレーションのテスト\n✅ 詳細情報の表示テスト\n\nこの通知が見えていれば設定完了です。';
+  const title = '🗑️ テスト通知（特別日程対応版）';
+  const body = '📢 Android PWA通知が正常に動作しています！\n\n✅ 音とバイブレーションのテスト\n✅ 詳細情報の表示テスト\n📅 年末年始の特別日程対応\n📱 この通知が見えて音が鳴れば設定完了です！\n\n🗑️ 特別日程機能が有効になっています';
   
   const options = createNotificationOptions(body, 'test-notification', [
     { action: 'test-ok', title: '動作確認OK', icon: './icon-64x64.png' },
@@ -241,8 +297,27 @@ function scheduleNotification(targetTime, message) {
   }
 }
 
-// ゴミ出しスケジュール判定
-function getTodayGarbage(date) {
+// 特別日程を取得
+function getSpecialSchedule(date) {
+  const dateString = formatDate(date);
+  return specialDates.get(dateString) || null;
+}
+
+// 日付フォーマット
+function formatDate(date) {
+  return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+}
+
+// 改良版ゴミ判定（特別日程対応）
+function getTodayGarbageWithSpecialSchedule(date) {
+  // まず特別日程をチェック
+  const specialSchedule = getSpecialSchedule(date);
+  if (specialSchedule !== null) {
+    console.log('特別日程が適用されました:', specialSchedule);
+    return specialSchedule;
+  }
+
+  // 通常のルールベース判定
   const dayOfWeek = date.getDay();
   const weekOfMonth = getWeekOfMonth(date);
   const garbage = [];

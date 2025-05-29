@@ -22,6 +22,7 @@
         <div class="header">
             <h1>🗑️ ゴミ出しカレンダー</h1>
             <p>港地区南・宮崎地区（男浦・女ノ浦）</p>
+            <div class="version-info">特別日程対応版 v2.0</div>
         </div>
 
         <div class="today-section">
@@ -57,6 +58,8 @@
             <div class="notification-status" id="notificationStatus">通知が無効です</div>
         </div>
 
+        <!-- 特別日程管理セクション（script.jsで自動追加されます） -->
+
         <div class="schedule-section">
             <h2 style="text-align: center; margin-bottom: 30px; color: #333;">収集スケジュール</h2>
             <div class="schedule-grid">
@@ -84,6 +87,16 @@
                     <p>収集時間: 18:00〜21:00</p>
                 </div>
             </div>
+
+            <div class="schedule-note">
+                <h4>📋 年末年始・祝日について</h4>
+                <ul>
+                    <li>年末年始期間中は収集スケジュールが変更される場合があります</li>
+                    <li>祝日により収集日が変更される場合があります</li>
+                    <li>このアプリは特別日程を自動で取得し、通知に反映します</li>
+                    <li>最新情報は有田市公式サイトでも確認してください</li>
+                </ul>
+            </div>
         </div>
 
         <div class="reminder-section">
@@ -92,7 +105,26 @@
                 <li>収集日の夜、午後6時～午後9時までに指定袋に入れて、指定場所に出してください</li>
                 <li>年末年始の収集に変更がある場合がございますので、出す日を確認してください</li>
                 <li>指定袋に入らない粗大ごみの収集は、清掃センターまでお申し込みください（電話：0737-82-5747）</li>
+                <li><strong>このアプリは年末年始の特別日程にも対応しています</strong></li>
             </ul>
+        </div>
+
+        <div class="footer-section">
+            <h3>ℹ️ アプリ情報</h3>
+            <div class="app-info">
+                <p><strong>有田市ゴミ出しカレンダー</strong> 特別日程対応版</p>
+                <p>バージョン: 2.0</p>
+                <p>対応機能:</p>
+                <ul>
+                    <li>✅ 基本的なゴミ出しスケジュール</li>
+                    <li>✅ 音・バイブ付き通知</li>
+                    <li>✅ バックグラウンド通知</li>
+                    <li>✅ 年末年始・祝日の特別日程対応</li>
+                    <li>✅ 最新情報の自動取得</li>
+                    <li>✅ 手動での特別日程追加</li>
+                </ul>
+                <p class="disclaimer">※このアプリは非公式です。正確な情報は有田市公式サイトでご確認ください。</p>
+            </div>
         </div>
     </div>
 

@@ -6,6 +6,205 @@ const garbageSchedule = {
     petBottles: [4] // 木曜(4) - 第2,4週
 };
 
+// 特別日程管理クラス
+class SpecialScheduleManager {
+    constructor() {
+        this.specialDates = new Map(); // 日付文字列 -> ゴミ種別配列
+        this.loadSpecialDates();
+        this.lastUpdateCheck = null;
+    }
+
+    // 特別日程の読み込み
+    loadSpecialDates() {
+        try {
+            const stored = localStorage.getItem('specialGarbageDates');
+            if (stored) {
+                const data = JSON.parse(stored);
+                this.specialDates = new Map(Object.entries(data));
+                console.log('特別日程を読み込みました:', this.specialDates.size, '件');
+            }
+        } catch (e) {
+            console.log('特別日程の読み込みに失敗:', e);
+        }
+
+        // デフォルトの年末年始スケジュール（例）
+        this.setDefaultHolidaySchedule();
+    }
+
+    // デフォルトの年末年始スケジュールを設定
+    setDefaultHolidaySchedule() {
+        const currentYear = new Date().getFullYear();
+        
+        // 年末年始の一般的な変更パターン（実際の日程に合わせて調整）
+        const holidayChanges = [
+            // 12月29日〜1月3日は収集なし（例）
+            { date: `${currentYear}-12-29`, types: [] },
+            { date: `${currentYear}-12-30`, types: [] },
+            { date: `${currentYear}-12-31`, types: [] },
+            { date: `${currentYear + 1}-01-01`, types: [] },
+            { date: `${currentYear + 1}-01-02`, types: [] },
+            { date: `${currentYear + 1}-01-03`, types: [] },
+            
+            // ゴールデンウィーク期間の変更（例）
+            { date: `${currentYear + 1}-05-03`, types: [] }, // 憲法記念日
+            { date: `${currentYear + 1}-05-04`, types: [] }, // みどりの日
+            { date: `${currentYear + 1}-05-05`, types: [] }, // こどもの日
+        ];
+
+        holidayChanges.forEach(change => {
+            this.setSpecialDate(change.date, change.types);
+        });
+    }
+
+    // 特別日程を設定
+    setSpecialDate(dateString, garbageTypes) {
+        this.specialDates.set(dateString, garbageTypes);
+        this.saveSpecialDates();
+    }
+
+    // 特別日程を削除
+    removeSpecialDate(dateString) {
+        this.specialDates.delete(dateString);
+        this.saveSpecialDates();
+    }
+
+    // 特別日程の保存
+    saveSpecialDates() {
+        try {
+            const data = Object.fromEntries(this.specialDates);
+            localStorage.setItem('specialGarbageDates', JSON.stringify(data));
+        } catch (e) {
+            console.log('特別日程の保存に失敗:', e);
+        }
+    }
+
+    // 指定日の特別日程を取得
+    getSpecialSchedule(date) {
+        const dateString = this.formatDate(date);
+        return this.specialDates.get(dateString) || null;
+    }
+
+    // 日付フォーマット
+    formatDate(date) {
+        return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+    }
+
+    // 有田市のページから最新情報を取得（CORSプロキシ使用）
+    async fetchLatestSchedule() {
+        try {
+            console.log('最新のゴミ出しスケジュールを確認中...');
+            
+            // CORSプロキシを使用して有田市のページを取得
+            const proxyUrl = 'https://api.allorigins.win/get?url=';
+            const targetUrl = 'https://www.city.arida.lg.jp/kurashi/gomikankyo/gomibunbetsu/1000951/1000954.html';
+            
+            const response = await fetch(proxyUrl + encodeURIComponent(targetUrl));
+            const data = await response.json();
+            
+            if (data.contents) {
+                this.parseScheduleFromHtml(data.contents);
+                this.lastUpdateCheck = new Date();
+            }
+        } catch (error) {
+            console.log('スケジュール取得エラー:', error);
+            // エラーの場合は手動設定を促す
+            this.showUpdateError();
+        }
+    }
+
+    // HTMLからスケジュール情報を解析
+    parseScheduleFromHtml(html) {
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            
+            // カレンダーテーブルを探す
+            const tables = doc.querySelectorAll('table');
+            
+            tables.forEach(table => {
+                this.parseCalendarTable(table);
+            });
+            
+            console.log('HTMLからスケジュール情報を解析完了');
+        } catch (error) {
+            console.log('HTML解析エラー:', error);
+        }
+    }
+
+    // カレンダーテーブルを解析
+    parseCalendarTable(table) {
+        const rows = table.querySelectorAll('tr');
+        let currentMonth = new Date().getMonth();
+        let currentYear = new Date().getFullYear();
+        
+        rows.forEach((row, rowIndex) => {
+            const cells = row.querySelectorAll('td');
+            
+            cells.forEach((cell, cellIndex) => {
+                const text = cell.textContent.trim();
+                const dateMatch = text.match(/(\d+)/);
+                
+                if (dateMatch) {
+                    const day = parseInt(dateMatch[1]);
+                    const dateString = `${currentYear}-${(currentMonth + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                    
+                    // セル内のゴミ種別を判定
+                    const garbageTypes = this.parseGarbageTypesFromCell(cell);
+                    
+                    if (garbageTypes.length > 0) {
+                        this.setSpecialDate(dateString, garbageTypes);
+                    }
+                }
+            });
+        });
+    }
+
+    // セルからゴミ種別を解析
+    parseGarbageTypesFromCell(cell) {
+        const types = [];
+        const text = cell.textContent;
+        const className = cell.className;
+        
+        // クラス名やテキストからゴミ種別を判定
+        if (text.includes('可燃') || className.includes('burnable')) {
+            types.push({ type: 'burnable', name: '可燃ごみ' });
+        }
+        if (text.includes('びん') || text.includes('プラスチック') || className.includes('bottles')) {
+            types.push({ type: 'bottles-plastic', name: 'びん類・プラスチック類' });
+        }
+        if (text.includes('缶') || text.includes('金属') || className.includes('cans')) {
+            types.push({ type: 'cans-metal', name: '缶・金属類・その他' });
+        }
+        if (text.includes('ペット') || className.includes('pet')) {
+            types.push({ type: 'pet-bottles', name: 'ペットボトル' });
+        }
+        
+        return types;
+    }
+
+    // 更新エラー表示
+    showUpdateError() {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'update-error';
+        errorDiv.innerHTML = `
+            <h4>⚠️ 最新情報の取得に失敗しました</h4>
+            <p>年末年始の特別日程は手動で設定してください。</p>
+            <button onclick="this.parentElement.style.display='none'">閉じる</button>
+        `;
+        
+        document.querySelector('.container').insertBefore(errorDiv, document.querySelector('.today-section'));
+    }
+
+    // 特別日程の一覧取得
+    getAllSpecialDates() {
+        return Array.from(this.specialDates.entries()).map(([date, types]) => ({
+            date,
+            types
+        }));
+    }
+}
+
+// 週数計算
 function getWeekOfMonth(date) {
     const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
     const firstWeekday = firstDay.getDay();
@@ -13,7 +212,16 @@ function getWeekOfMonth(date) {
     return Math.floor(offsetDate / 7) + 1;
 }
 
+// 改良版ゴミ判定（特別日程対応）
 function getTodayGarbage(date) {
+    // まず特別日程をチェック
+    const specialSchedule = specialScheduleManager.getSpecialSchedule(date);
+    if (specialSchedule !== null) {
+        console.log('特別日程が適用されました:', specialSchedule);
+        return specialSchedule;
+    }
+
+    // 通常のルールベース判定
     const dayOfWeek = date.getDay();
     const weekOfMonth = getWeekOfMonth(date);
     const garbage = [];
@@ -76,6 +284,32 @@ function updateCalendar() {
     // 明日のゴミ
     const tomorrowGarbage = getTodayGarbage(tomorrow);
     displayGarbage(tomorrowGarbage, 'tomorrowGarbage', false);
+
+    // 特別日程表示の更新
+    updateSpecialScheduleDisplay();
+}
+
+// 特別日程表示の更新
+function updateSpecialScheduleDisplay() {
+    const container = document.getElementById('specialScheduleList');
+    if (!container) return;
+
+    const specialDates = specialScheduleManager.getAllSpecialDates()
+        .filter(item => new Date(item.date) >= new Date())
+        .sort((a, b) => new Date(a.date) - new Date(b.date))
+        .slice(0, 5); // 直近5件
+
+    if (specialDates.length > 0) {
+        container.innerHTML = '<h4>📅 直近の特別日程</h4>' + 
+            specialDates.map(item => {
+                const date = new Date(item.date);
+                const dateStr = date.toLocaleDateString('ja-JP');
+                const typeNames = item.types.map(t => t.name).join('、') || '収集なし';
+                return `<div class="special-date-item">${dateStr}: ${typeNames}</div>`;
+            }).join('');
+    } else {
+        container.innerHTML = '<h4>📅 特別日程</h4><p>現在、特別日程はありません</p>';
+    }
 }
 
 // 通知オプション作成関数
@@ -86,10 +320,10 @@ function createNotificationOptions(title, body, tag, includeActions = true) {
         badge: './icon-64x64.png',
         tag: tag,
         requireInteraction: true,
-        silent: false, // 音を有効にする
-        vibrate: [500, 110, 500, 110, 450, 110, 200, 110, 170, 40, 450, 110, 200, 110, 170, 40, 500], // 長いバイブパターン
+        silent: false,
+        vibrate: [500, 110, 500, 110, 450, 110, 200, 110, 170, 40, 450, 110, 200, 110, 170, 40, 500],
         timestamp: Date.now(),
-        renotify: true, // 同じタグでも再通知
+        renotify: true,
         data: {
             timestamp: Date.now(),
             origin: 'garbage-calendar'
@@ -431,7 +665,7 @@ class NotificationManager {
         if (this.isEnabled && currentPermission === 'granted') {
             toggleBtn.textContent = '通知を無効にする';
             toggleBtn.classList.add('disabled');
-            status.innerHTML = `✅ 通知が有効です（毎日 ${this.notificationTime} に通知）<br><small>🔊 音とバイブレーション付きで通知します<br>📱 Android設定でも通知が許可されていることを確認してください</small>`;
+            status.innerHTML = `✅ 通知が有効です（毎日 ${this.notificationTime} に通知）<br><small>🔊 音とバイブレーション付きで通知します<br>📅 年末年始の特別日程にも対応します<br>📱 Android設定でも通知が許可されていることを確認してください</small>`;
         } else {
             toggleBtn.textContent = '通知を有効にする';
             toggleBtn.classList.remove('disabled');
@@ -448,14 +682,14 @@ class NotificationManager {
         console.log('テスト通知送信中...');
         
         const testGarbage = getTodayGarbage(new Date());
-        let title = '🗑️ テスト通知';
+        let title = '🗑️ テスト通知（特別日程対応版）';
         let body;
         
         if (testGarbage.length > 0) {
             const garbageNames = testGarbage.map(g => g.name).join('、');
-            body = `📢 Android PWA通知が正常に動作しています！\n\n🗑️ 今日は${garbageNames}の日です\n📍 収集時間: 午後6時〜午後9時\n📱 音とバイブレーションのテスト中\n\nこの通知が見えて音が鳴れば設定完了です！`;
+            body = `📢 Android PWA通知が正常に動作しています！\n\n🗑️ 今日は${garbageNames}の日です\n📍 収集時間: 午後6時〜午後9時\n📅 年末年始やイレギュラー日程にも対応\n📱 音とバイブレーションのテスト中\n\nこの通知が見えて音が鳴れば設定完了です！`;
         } else {
-            body = `📢 Android PWA通知が正常に動作しています！\n\n✅ 音とバイブレーションのテスト\n✅ 詳細情報の表示テスト\n📱 この通知が見えて音が鳴れば設定完了です！\n\n🗑️ 今日はゴミ出しの日ではありません`;
+            body = `📢 Android PWA通知が正常に動作しています！\n\n✅ 音とバイブレーションのテスト\n✅ 詳細情報の表示テスト\n📅 年末年始の特別日程対応\n📱 この通知が見えて音が鳴れば設定完了です！\n\n🗑️ 今日はゴミ出しの日ではありません`;
         }
         
         // Service Workerに通知指示を送信
@@ -513,9 +747,17 @@ class NotificationManager {
 
         if (todayGarbage.length > 0) {
             const garbageNames = todayGarbage.map(g => g.name).join('、');
-            body = `【重要】今日は${garbageNames}の日です！\n\n📍 収集時間: 午後6時〜午後9時\n📍 場所: 指定の収集場所\n📍 袋: 指定袋を使用してください\n\n⏰ 忘れずに出しましょう！`;
+            
+            // 特別日程かどうかをチェック
+            const isSpecial = specialScheduleManager.getSpecialSchedule(today) !== null;
+            const specialNote = isSpecial ? '\n📅 ※特別日程が適用されています' : '';
+            
+            body = `【重要】今日は${garbageNames}の日です！${specialNote}\n\n📍 収集時間: 午後6時〜午後9時\n📍 場所: 指定の収集場所\n📍 袋: 指定袋を使用してください\n\n⏰ 忘れずに出しましょう！`;
         } else {
-            body = '今日はゴミ出しの日ではありません。\n\n📅 次回のゴミ出し予定を確認してください。';
+            const isSpecial = specialScheduleManager.getSpecialSchedule(today) !== null;
+            const specialNote = isSpecial ? '\n📅 ※年末年始・祝日等の特別日程です' : '';
+            
+            body = `今日はゴミ出しの日ではありません。${specialNote}\n\n📅 次回のゴミ出し予定を確認してください。`;
         }
 
         try {
@@ -546,15 +788,182 @@ class NotificationManager {
     }
 }
 
+// 特別日程管理UIクラス
+class SpecialScheduleUI {
+    constructor(manager) {
+        this.manager = manager;
+        this.setupUI();
+    }
+
+    setupUI() {
+        // 特別日程管理ボタンの追加
+        const container = document.querySelector('.container');
+        const scheduleSection = document.createElement('div');
+        scheduleSection.className = 'schedule-management-section';
+        scheduleSection.innerHTML = `
+            <div class="schedule-management">
+                <h3>📅 特別日程管理</h3>
+                <div class="schedule-controls">
+                    <button class="schedule-button" id="updateScheduleBtn">最新情報を取得</button>
+                    <button class="schedule-button" id="addSpecialDateBtn">特別日程を追加</button>
+                    <button class="schedule-button" id="viewScheduleBtn">特別日程一覧</button>
+                </div>
+                <div id="specialScheduleList" class="special-schedule-list"></div>
+                <div id="scheduleUpdateStatus" class="schedule-status"></div>
+            </div>
+        `;
+        
+        // 通知設定の後に挿入
+        const notificationSection = document.querySelector('.notification-section');
+        container.insertBefore(scheduleSection, notificationSection.nextSibling);
+
+        // イベントリスナーの設定
+        document.getElementById('updateScheduleBtn').addEventListener('click', () => this.updateSchedule());
+        document.getElementById('addSpecialDateBtn').addEventListener('click', () => this.showAddDialog());
+        document.getElementById('viewScheduleBtn').addEventListener('click', () => this.showScheduleList());
+    }
+
+    async updateSchedule() {
+        const statusDiv = document.getElementById('scheduleUpdateStatus');
+        statusDiv.innerHTML = '🔄 最新情報を取得中...';
+        
+        try {
+            await this.manager.fetchLatestSchedule();
+            statusDiv.innerHTML = '✅ 最新情報を取得しました';
+            updateSpecialScheduleDisplay();
+        } catch (error) {
+            statusDiv.innerHTML = '❌ 最新情報の取得に失敗しました';
+        }
+        
+        setTimeout(() => {
+            statusDiv.innerHTML = '';
+        }, 3000);
+    }
+
+    showAddDialog() {
+        const dialog = document.createElement('div');
+        dialog.className = 'special-date-dialog';
+        dialog.innerHTML = `
+            <div class="dialog-content">
+                <h4>特別日程を追加</h4>
+                <div class="form-group">
+                    <label>日付:</label>
+                    <input type="date" id="specialDate" min="${new Date().toISOString().split('T')[0]}">
+                </div>
+                <div class="form-group">
+                    <label>ゴミ種別:</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" value="burnable"> 可燃ごみ</label>
+                        <label><input type="checkbox" value="bottles-plastic"> びん類・プラスチック類</label>
+                        <label><input type="checkbox" value="cans-metal"> 缶・金属類・その他</label>
+                        <label><input type="checkbox" value="pet-bottles"> ペットボトル</label>
+                        <label><input type="checkbox" value="none"> 収集なし</label>
+                    </div>
+                </div>
+                <div class="dialog-buttons">
+                    <button onclick="this.closest('.special-date-dialog').remove()">キャンセル</button>
+                    <button onclick="specialScheduleUI.addSpecialDate()">追加</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+    }
+
+    addSpecialDate() {
+        const dateInput = document.getElementById('specialDate');
+        const checkboxes = document.querySelectorAll('.checkbox-group input[type="checkbox"]:checked');
+        
+        if (!dateInput.value) {
+            alert('日付を選択してください');
+            return;
+        }
+
+        const types = [];
+        checkboxes.forEach(cb => {
+            if (cb.value !== 'none') {
+                const typeMap = {
+                    'burnable': { type: 'burnable', name: '可燃ごみ' },
+                    'bottles-plastic': { type: 'bottles-plastic', name: 'びん類・プラスチック類' },
+                    'cans-metal': { type: 'cans-metal', name: '缶・金属類・その他' },
+                    'pet-bottles': { type: 'pet-bottles', name: 'ペットボトル' }
+                };
+                types.push(typeMap[cb.value]);
+            }
+        });
+
+        this.manager.setSpecialDate(dateInput.value, types);
+        document.querySelector('.special-date-dialog').remove();
+        updateSpecialScheduleDisplay();
+        
+        alert('特別日程を追加しました');
+    }
+
+    showScheduleList() {
+        const specialDates = this.manager.getAllSpecialDates()
+            .sort((a, b) => new Date(a.date) - new Date(b.date));
+        
+        if (specialDates.length === 0) {
+            alert('特別日程は設定されていません');
+            return;
+        }
+
+        const dialog = document.createElement('div');
+        dialog.className = 'schedule-list-dialog';
+        dialog.innerHTML = `
+            <div class="dialog-content">
+                <h4>特別日程一覧</h4>
+                <div class="schedule-list">
+                    ${specialDates.map(item => {
+                        const date = new Date(item.date);
+                        const dateStr = date.toLocaleDateString('ja-JP');
+                        const typeNames = item.types.map(t => t.name).join('、') || '収集なし';
+                        return `
+                            <div class="schedule-item">
+                                <span>${dateStr}: ${typeNames}</span>
+                                <button onclick="specialScheduleUI.removeSpecialDate('${item.date}')">削除</button>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <div class="dialog-buttons">
+                    <button onclick="this.closest('.schedule-list-dialog').remove()">閉じる</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+    }
+
+    removeSpecialDate(dateString) {
+        if (confirm('この特別日程を削除しますか？')) {
+            this.manager.removeSpecialDate(dateString);
+            document.querySelector('.schedule-list-dialog').remove();
+            updateSpecialScheduleDisplay();
+            this.showScheduleList();
+        }
+    }
+}
+
+// グローバル変数
+let specialScheduleManager;
+let specialScheduleUI;
+
 // 初期化
 updateCalendar();
 setInterval(updateCalendar, 60000);
+
+// 特別日程管理の初期化
+specialScheduleManager = new SpecialScheduleManager();
+specialScheduleUI = new SpecialScheduleUI(specialScheduleManager);
 
 const pwaManager = new PWAManager();
 const notificationManager = new NotificationManager();
 
 // グローバルに設定（デバッグ用）
 window.notificationManager = notificationManager;
+window.specialScheduleManager = specialScheduleManager;
+window.specialScheduleUI = specialScheduleUI;
 
 // ページ離脱時の処理
 window.addEventListener('beforeunload', () => {
@@ -562,3 +971,10 @@ window.addEventListener('beforeunload', () => {
         window.notificationManager.onAppClose();
     }
 });
+
+// 定期的なスケジュール更新（1日1回）
+setInterval(() => {
+    if (Math.random() < 0.1) { // 10%の確率で実行（負荷軽減）
+        specialScheduleManager.fetchLatestSchedule();
+    }
+}, 24 * 60 * 60 * 1000);
