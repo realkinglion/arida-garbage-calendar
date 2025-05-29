@@ -1,4 +1,4 @@
-const CACHE_NAME = 'garbage-calendar-v2';
+const CACHE_NAME = 'garbage-calendar-v3';
 const urlsToCache = [
   './',
   './index.html',
@@ -55,7 +55,19 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   
   event.waitUntil(
-    clients.openWindow('./')
+    clients.matchAll({
+      type: 'window',
+      includeUncontrolled: true
+    }).then((clientList) => {
+      // すでに開いているタブがあれば、そこにフォーカス
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin)) {
+          return client.focus();
+        }
+      }
+      // なければ新しいウィンドウを開く
+      return clients.openWindow('./');
+    })
   );
 });
 
@@ -65,17 +77,7 @@ self.addEventListener('push', (event) => {
   
   if (event.data) {
     const data = event.data.json();
-    const options = {
-      body: data.body,
-      icon: './icon-192x192.png',
-      badge: './icon-64x64.png',
-      requireInteraction: true,
-      tag: 'garbage-reminder',
-      vibrate: [200, 100, 200],
-      actions: [
-        { action: 'view', title: '確認' }
-      ]
-    };
+    const options = createNotificationOptions(data.body, 'push-notification');
     
     event.waitUntil(
       self.registration.showNotification(data.title, options)
@@ -116,6 +118,37 @@ self.addEventListener('message', (event) => {
   }
 });
 
+// 通知オプション作成（音・バイブ対応）
+function createNotificationOptions(body, tag, actions = []) {
+  return {
+    body: body,
+    icon: './icon-192x192.png',
+    badge: './icon-64x64.png',
+    tag: tag,
+    requireInteraction: true,
+    silent: false, // 音を有効にする
+    vibrate: [500, 110, 500, 110, 450, 110, 200, 110, 170, 40, 450, 110, 200, 110, 170, 40, 500], // 長いバイブパターン
+    timestamp: Date.now(),
+    renotify: true, // 同じタグでも再通知
+    actions: actions.length > 0 ? actions : [
+      { 
+        action: 'view', 
+        title: '詳細を見る',
+        icon: './icon-64x64.png'
+      },
+      { 
+        action: 'dismiss', 
+        title: '閉じる',
+        icon: './icon-64x64.png'
+      }
+    ],
+    data: {
+      timestamp: Date.now(),
+      origin: 'garbage-calendar'
+    }
+  };
+}
+
 // バックグラウンド同期実行
 async function performBackgroundSync() {
   console.log('Performing background sync...');
@@ -135,23 +168,33 @@ async function performDailyCheck() {
   
   if (today.length > 0) {
     const garbageNames = today.map(g => g.name).join('、');
+    const title = '🗑️ ゴミ出しリマインダー';
+    const body = `【重要】今日は${garbageNames}の日です！\n\n📍 収集時間: 午後6時〜午後9時\n📍 場所: 指定の収集場所\n📍 袋: 指定袋を使用してください\n\n忘れずに出しましょう！`;
     
-    await self.registration.showNotification('🗑️ ゴミ出しリマインダー', {
-      body: `今日は${garbageNames}の日です！\n収集時間: 18:00〜21:00`,
-      icon: './icon-192x192.png',
-      badge: './icon-64x64.png',
-      requireInteraction: true,
-      tag: 'daily-reminder',
-      vibrate: [200, 100, 200],
-      actions: [
-        { action: 'view', title: '詳細を見る' }
-      ],
-      timestamp: Date.now()
-    });
+    const options = createNotificationOptions(body, 'daily-reminder');
+    
+    await self.registration.showNotification(title, options);
     
     console.log('Daily notification sent:', garbageNames);
   } else {
     console.log('No garbage collection today');
+    
+    // ゴミ出しがない日でも通知（オプション）
+    const title = '🗑️ ゴミ出し情報';
+    const body = '今日はゴミ出しの日ではありません。\n\n次回のゴミ出し予定を確認してください。';
+    
+    // この通知は控えめに
+    const options = {
+      body: body,
+      icon: './icon-192x192.png',
+      tag: 'no-garbage-today',
+      requireInteraction: false,
+      silent: true, // この通知は音なし
+      vibrate: [200], // 短いバイブ
+      timestamp: Date.now()
+    };
+    
+    // await self.registration.showNotification(title, options);
   }
 }
 
@@ -159,15 +202,15 @@ async function performDailyCheck() {
 async function showTestNotification() {
   console.log('Showing test notification...');
   
-  await self.registration.showNotification('🗑️ テスト通知', {
-    body: 'Android PWA通知が正常に動作しています！',
-    icon: './icon-192x192.png',
-    badge: './icon-64x64.png',
-    requireInteraction: true,
-    tag: 'test-notification',
-    vibrate: [200, 100, 200],
-    timestamp: Date.now()
-  });
+  const title = '🗑️ テスト通知';
+  const body = '📢 Android PWA通知が正常に動作しています！\n\n✅ 音とバイブレーションのテスト\n✅ 詳細情報の表示テスト\n\nこの通知が見えていれば設定完了です。';
+  
+  const options = createNotificationOptions(body, 'test-notification', [
+    { action: 'test-ok', title: '動作確認OK', icon: './icon-64x64.png' },
+    { action: 'test-settings', title: '設定確認', icon: './icon-64x64.png' }
+  ]);
+  
+  await self.registration.showNotification(title, options);
 }
 
 // 通知のスケジューリング（Androidタイマー対応）

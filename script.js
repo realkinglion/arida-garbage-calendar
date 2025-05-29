@@ -78,6 +78,42 @@ function updateCalendar() {
     displayGarbage(tomorrowGarbage, 'tomorrowGarbage', false);
 }
 
+// 通知オプション作成関数
+function createNotificationOptions(title, body, tag, includeActions = true) {
+    const options = {
+        body: body,
+        icon: './icon-192x192.png',
+        badge: './icon-64x64.png',
+        tag: tag,
+        requireInteraction: true,
+        silent: false, // 音を有効にする
+        vibrate: [500, 110, 500, 110, 450, 110, 200, 110, 170, 40, 450, 110, 200, 110, 170, 40, 500], // 長いバイブパターン
+        timestamp: Date.now(),
+        renotify: true, // 同じタグでも再通知
+        data: {
+            timestamp: Date.now(),
+            origin: 'garbage-calendar'
+        }
+    };
+
+    if (includeActions) {
+        options.actions = [
+            { 
+                action: 'view', 
+                title: '詳細を見る',
+                icon: './icon-64x64.png'
+            },
+            { 
+                action: 'dismiss', 
+                title: '了解',
+                icon: './icon-64x64.png'
+            }
+        ];
+    }
+
+    return options;
+}
+
 // PWA機能
 class PWAManager {
     constructor() {
@@ -317,7 +353,7 @@ class NotificationManager {
                     await this.showTestNotification();
                 } else {
                     console.log('通知が拒否されました:', permission);
-                    alert('通知が許可されませんでした。\n\nAndroid設定で確認してください：\n1. アプリ設定 > 通知 > 許可\n2. Chrome設定 > サイト設定 > 通知');
+                    alert('通知が許可されませんでした。\n\n🔧 Android設定で確認してください：\n\n1️⃣ Android設定 > アプリ > ゴミ出し > 通知 > 許可\n2️⃣ Android設定 > アプリ > ゴミ出し > 通知 > 音とバイブレーション > ON\n3️⃣ Android設定 > 音 > デフォルトの通知音 > 設定確認');
                     return;
                 }
             } catch (error) {
@@ -395,13 +431,13 @@ class NotificationManager {
         if (this.isEnabled && currentPermission === 'granted') {
             toggleBtn.textContent = '通知を無効にする';
             toggleBtn.classList.add('disabled');
-            status.innerHTML = `通知が有効です（毎日 ${this.notificationTime} に通知）<br><small>Android設定でも通知が許可されていることを確認してください</small>`;
+            status.innerHTML = `✅ 通知が有効です（毎日 ${this.notificationTime} に通知）<br><small>🔊 音とバイブレーション付きで通知します<br>📱 Android設定でも通知が許可されていることを確認してください</small>`;
         } else {
             toggleBtn.textContent = '通知を有効にする';
             toggleBtn.classList.remove('disabled');
             
             if (currentPermission === 'denied') {
-                status.innerHTML = '通知が拒否されています<br><small>Android設定 > アプリ > 通知設定で許可してください</small>';
+                status.innerHTML = '❌ 通知が拒否されています<br><small>📱 Android設定 > アプリ > ゴミ出し > 通知設定で許可してください</small>';
             } else {
                 status.textContent = '通知が無効です';
             }
@@ -411,6 +447,17 @@ class NotificationManager {
     async showTestNotification() {
         console.log('テスト通知送信中...');
         
+        const testGarbage = getTodayGarbage(new Date());
+        let title = '🗑️ テスト通知';
+        let body;
+        
+        if (testGarbage.length > 0) {
+            const garbageNames = testGarbage.map(g => g.name).join('、');
+            body = `📢 Android PWA通知が正常に動作しています！\n\n🗑️ 今日は${garbageNames}の日です\n📍 収集時間: 午後6時〜午後9時\n📱 音とバイブレーションのテスト中\n\nこの通知が見えて音が鳴れば設定完了です！`;
+        } else {
+            body = `📢 Android PWA通知が正常に動作しています！\n\n✅ 音とバイブレーションのテスト\n✅ 詳細情報の表示テスト\n📱 この通知が見えて音が鳴れば設定完了です！\n\n🗑️ 今日はゴミ出しの日ではありません`;
+        }
+        
         // Service Workerに通知指示を送信
         this.sendMessageToServiceWorker({
             type: 'TEST_NOTIFICATION'
@@ -419,18 +466,13 @@ class NotificationManager {
         // 直接通知も送信（フォールバック）
         try {
             if (this.serviceWorkerRegistration) {
-                await this.serviceWorkerRegistration.showNotification('🗑️ テスト通知', {
-                    body: 'Android PWA通知テスト中...',
-                    icon: './icon-192x192.png',
-                    badge: './icon-64x64.png',
-                    requireInteraction: true,
-                    tag: 'test-notification',
-                    vibrate: [200, 100, 200],
-                    timestamp: Date.now()
-                });
+                const options = createNotificationOptions(title, body, 'test-notification');
+                await this.serviceWorkerRegistration.showNotification(title, options);
+                console.log('テスト通知送信完了');
             }
         } catch (error) {
             console.error('通知送信エラー:', error);
+            alert('通知送信でエラーが発生しました。\n\n📱 Android設定を確認してください：\n\n1️⃣ 設定 > アプリ > ゴミ出し > 通知 > 許可\n2️⃣ 設定 > アプリ > ゴミ出し > バッテリー > 最適化しない\n3️⃣ 設定 > 音 > 通知音 > 音量確認');
         }
     }
 
@@ -467,26 +509,19 @@ class NotificationManager {
         const todayGarbage = getTodayGarbage(today);
         
         let title = '🗑️ 今日のゴミ出し情報';
-        let message;
+        let body;
 
         if (todayGarbage.length > 0) {
             const garbageNames = todayGarbage.map(g => g.name).join('、');
-            message = `今日は${garbageNames}の日です！\n収集時間: 18:00〜21:00`;
+            body = `【重要】今日は${garbageNames}の日です！\n\n📍 収集時間: 午後6時〜午後9時\n📍 場所: 指定の収集場所\n📍 袋: 指定袋を使用してください\n\n⏰ 忘れずに出しましょう！`;
         } else {
-            message = '今日はゴミ出しの日ではありません。';
+            body = '今日はゴミ出しの日ではありません。\n\n📅 次回のゴミ出し予定を確認してください。';
         }
 
         try {
             if (this.serviceWorkerRegistration) {
-                await this.serviceWorkerRegistration.showNotification(title, {
-                    body: message,
-                    icon: './icon-192x192.png',
-                    badge: './icon-64x64.png',
-                    requireInteraction: true,
-                    tag: 'daily-reminder',
-                    vibrate: [200, 100, 200],
-                    timestamp: Date.now()
-                });
+                const options = createNotificationOptions(title, body, 'daily-reminder');
+                await this.serviceWorkerRegistration.showNotification(title, options);
             }
             console.log('日次通知送信完了');
         } catch (error) {
