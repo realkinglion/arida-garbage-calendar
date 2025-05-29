@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>有田市ゴミ出しカレンダー</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    
+    <!-- PWA用メタタグ -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="ゴミ出し">
+    <link rel="apple-touch-icon" href="icon-192x192.png">
+    
+    <!-- スタイルシート -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗑️ ゴミ出しカレンダー</h1>
+            <p>港地区南・宮崎地区（男浦・女ノ浦）</p>
+        </div>
+
+        <div class="today-section">
+            <div class="today-date" id="todayDate"></div>
+            
+            <div class="garbage-today">
+                <h3>今日のゴミ出し</h3>
+                <div id="todayGarbage"></div>
+            </div>
+
+            <div class="garbage-today">
+                <h3>明日のゴミ出し</h3>
+                <div id="tomorrowGarbage"></div>
+            </div>
+        </div>
+
+        <div class="pwa-section">
+            <h3>📱 アプリとしてインストール</h3>
+            <p>スマートフォンやパソコンにアプリとしてインストールして、バックグラウンド通知を受け取りましょう。</p>
+            <div style="margin-top: 15px;">
+                <button class="install-button" id="installButton" disabled>アプリをインストール</button>
+                <div class="pwa-status" id="pwaStatus">インストール準備中...</div>
+            </div>
+        </div>
+
+        <div class="notification-section">
+            <h3>🔔 通知設定</h3>
+            <div class="notification-controls">
+                <button class="notification-toggle" id="notificationToggle">通知を有効にする</button>
+                <label for="notificationTime">通知時間:</label>
+                <input type="time" id="notificationTime" class="time-input" value="07:00">
+            </div>
+            <div class="notification-status" id="notificationStatus">通知が無効です</div>
+        </div>
+
+        <div class="schedule-section">
+            <h2 style="text-align: center; margin-bottom: 30px; color: #333;">収集スケジュール</h2>
+            <div class="schedule-grid">
+                <div class="schedule-card burnable">
+                    <h4>🔥 可燃ごみ</h4>
+                    <p><strong>毎週 火曜・金曜</strong></p>
+                    <p>収集時間: 18:00〜21:00</p>
+                </div>
+
+                <div class="schedule-card bottles-plastic">
+                    <h4>🍶 びん類・プラスチック類</h4>
+                    <p><strong>第1・3・5水曜</strong></p>
+                    <p>収集時間: 18:00〜21:00</p>
+                </div>
+
+                <div class="schedule-card cans-metal">
+                    <h4>🥫 缶・金属類・その他</h4>
+                    <p><strong>第2・4水曜</strong></p>
+                    <p>収集時間: 18:00〜21:00</p>
+                </div>
+
+                <div class="schedule-card pet-bottles">
+                    <h4>♻️ ペットボトル</h4>
+                    <p><strong>第2・4木曜</strong></p>
+                    <p>収集時間: 18:00〜21:00</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="reminder-section">
+            <h3>📋 お願い・注意事項</h3>
+            <ul>
+                <li>収集日の夜、午後6時～午後9時までに指定袋に入れて、指定場所に出してください</li>
+                <li>年末年始の収集に変更がある場合がございますので、出す日を確認してください</li>
+                <li>指定袋に入らない粗大ごみの収集は、清掃センターまでお申し込みください（電話：0737-82-5747）</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

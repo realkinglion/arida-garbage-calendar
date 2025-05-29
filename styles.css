@@ -1,0 +1,279 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    overflow: hidden;
+}
+
+.header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 30px;
+    text-align: center;
+}
+
+.header h1 {
+    font-size: 2rem;
+    margin-bottom: 10px;
+}
+
+.header p {
+    opacity: 0.9;
+    font-size: 1.1rem;
+}
+
+.today-section {
+    padding: 30px;
+    border-bottom: 1px solid #eee;
+}
+
+.today-date {
+    font-size: 1.5rem;
+    color: #333;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.garbage-today {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 15px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.garbage-today h3 {
+    color: #333;
+    margin-bottom: 15px;
+}
+
+.garbage-type {
+    display: inline-block;
+    padding: 10px 20px;
+    margin: 5px;
+    border-radius: 25px;
+    color: white;
+    font-weight: bold;
+}
+
+.burnable {
+    background: #ff6b6b;
+}
+
+.bottles-plastic {
+    background: #4ecdc4;
+}
+
+.cans-metal {
+    background: #45b7d1;
+}
+
+.pet-bottles {
+    background: #96ceb4;
+}
+
+.no-garbage {
+    color: #666;
+    font-style: italic;
+}
+
+.pwa-section {
+    background: #e3f2fd;
+    border: 1px solid #90caf9;
+    padding: 20px;
+    margin: 30px;
+    border-radius: 15px;
+}
+
+.pwa-section h3 {
+    color: #1565c0;
+    margin-bottom: 15px;
+}
+
+.install-button {
+    background: #2196f3;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s;
+    margin-right: 10px;
+}
+
+.install-button:hover {
+    background: #1976d2;
+    transform: translateY(-2px);
+}
+
+.install-button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+.pwa-status {
+    color: #1565c0;
+    margin-top: 10px;
+}
+
+.notification-section {
+    background: #e8f5e8;
+    border: 1px solid #c3e6c3;
+    padding: 20px;
+    margin: 30px;
+    border-radius: 15px;
+}
+
+.notification-section h3 {
+    color: #2d5a2d;
+    margin-bottom: 15px;
+}
+
+.notification-controls {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 15px;
+}
+
+.notification-toggle {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s;
+}
+
+.notification-toggle:hover {
+    background: #218838;
+    transform: translateY(-2px);
+}
+
+.notification-toggle.disabled {
+    background: #dc3545;
+}
+
+.notification-toggle.disabled:hover {
+    background: #c82333;
+}
+
+.time-input {
+    padding: 8px 12px;
+    border: 2px solid #c3e6c3;
+    border-radius: 10px;
+    font-size: 1rem;
+}
+
+.notification-status {
+    color: #2d5a2d;
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+.schedule-section {
+    padding: 30px;
+}
+
+.schedule-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.schedule-card {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 15px;
+    border-left: 5px solid;
+}
+
+.schedule-card.burnable {
+    border-left-color: #ff6b6b;
+}
+
+.schedule-card.bottles-plastic {
+    border-left-color: #4ecdc4;
+}
+
+.schedule-card.cans-metal {
+    border-left-color: #45b7d1;
+}
+
+.schedule-card.pet-bottles {
+    border-left-color: #96ceb4;
+}
+
+.schedule-card h4 {
+    color: #333;
+    margin-bottom: 10px;
+}
+
+.schedule-card p {
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.reminder-section {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    padding: 20px;
+    margin: 30px;
+    border-radius: 15px;
+}
+
+.reminder-section h3 {
+    color: #856404;
+    margin-bottom: 15px;
+}
+
+.reminder-section ul {
+    color: #856404;
+    padding-left: 20px;
+}
+
+.reminder-section li {
+    margin-bottom: 5px;
+}
+
+@media (max-width: 768px) {
+    .container {
+        margin: 10px;
+    }
+    
+    .header {
+        padding: 20px;
+    }
+    
+    .header h1 {
+        font-size: 1.5rem;
+    }
+    
+    .today-section, .schedule-section {
+        padding: 20px;
+    }
+    
+    .notification-controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}
