@@ -200,6 +200,7 @@ class SpecialScheduleManager {
         this.specialDates = new Map();
         this.fetcher = new PerfectScheduleFetcher();
         
+        // Gist URLを正しく設定
         this.gistFallbackUrl = 'https://gist.githubusercontent.com/realkinglion/4859d37c601e6f3b3a07cc049356234b/raw/a3834ed438c03cfd9b7d83d021f7bd142ca7429a/schedule.json';
         
         this.loadSpecialDates();
@@ -216,7 +217,7 @@ class SpecialScheduleManager {
             return scheduleData;
         } catch (error) {
             console.warn('⚠️ プロキシ経由での取得に失敗。Gistからのフォールバックを試みます。', error);
-            if (!this.gistFallbackUrl || this.gistFallbackUrl.includes('【')) {
+            if (!this.gistFallbackUrl || this.gistFallbackUrl.includes('YOUR_GIST_ID')) {
                 console.error('❌ GistのURLが設定されていません。フォールバックできません。');
                 throw new Error('Gist URL is not configured.');
             }
@@ -478,10 +479,26 @@ class PWAManager {
     async init() {
         if ('serviceWorker' in navigator) {
             try {
-                const registration = await navigator.serviceWorker.register('./service-worker.js');
+                // GitHub Pages対応: 明示的にスコープを指定
+                const registration = await navigator.serviceWorker.register('./service-worker.js', {
+                    scope: './'
+                });
                 console.log('Service Worker registered:', registration);
+                console.log('Service Worker scope:', registration.scope);
+                
+                // 登録後、すぐにアクティブになるのを待つ
+                await navigator.serviceWorker.ready;
+                console.log('Service Worker is ready');
             } catch (error) {
-                console.log('Service Worker registration failed:', error);
+                console.error('Service Worker registration failed:', error);
+                console.error('詳細:', error.message);
+                
+                // エラーの詳細を表示
+                const pwaStatus = document.getElementById('pwaStatus');
+                if (pwaStatus) {
+                    pwaStatus.textContent = 'Service Worker登録エラー: ' + error.message;
+                    pwaStatus.style.color = 'red';
+                }
             }
         }
         this.setupInstallPrompt();
@@ -490,33 +507,61 @@ class PWAManager {
     setupInstallPrompt() {
         const installButton = document.getElementById('installButton');
         const pwaStatus = document.getElementById('pwaStatus');
+        
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
             this.deferredPrompt = e;
             installButton.disabled = false;
             pwaStatus.textContent = 'アプリとしてインストール可能です';
+            console.log('PWA インストール可能');
         });
+        
         installButton.addEventListener('click', async () => {
-            if (!this.deferredPrompt) return;
+            if (!this.deferredPrompt) {
+                console.log('インストールプロンプトが利用できません');
+                return;
+            }
+            
             this.deferredPrompt.prompt();
             const { outcome } = await this.deferredPrompt.userChoice;
+            
             if (outcome === 'accepted') {
                 pwaStatus.textContent = 'アプリがインストールされました！';
+                console.log('PWA インストール完了');
+            } else {
+                console.log('PWA インストールがキャンセルされました');
             }
+            
             this.deferredPrompt = null;
             installButton.disabled = true;
         });
+        
         window.addEventListener('appinstalled', () => {
             pwaStatus.textContent = 'アプリが正常にインストールされました！';
             installButton.style.display = 'none';
+            console.log('PWA インストール完了イベント');
         });
+        
+        // 1秒後に状態を確認
         setTimeout(() => {
             if (!this.deferredPrompt) {
                 if (window.matchMedia('(display-mode: standalone)').matches) {
                     pwaStatus.textContent = 'アプリとして実行中です';
                     installButton.style.display = 'none';
+                    console.log('PWA スタンドアロンモードで実行中');
                 } else {
-                    pwaStatus.textContent = 'このブラウザではインストールできません';
+                    // Service Workerの状態も確認
+                    if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.getRegistration().then(registration => {
+                            if (registration) {
+                                pwaStatus.textContent = 'Service Worker登録済み（インストール待機中）';
+                            } else {
+                                pwaStatus.textContent = 'Service Worker登録待ち';
+                            }
+                        });
+                    } else {
+                        pwaStatus.textContent = 'このブラウザではインストールできません';
+                    }
                 }
             }
         }, 1000);
@@ -528,6 +573,7 @@ class NotificationManager {
         this.isEnabled = false;
         this.notificationTime = '07:00';
         this.serviceWorkerRegistration = null;
+        this.pageCheckInterval = null;
         this.init();
     }
 
@@ -585,6 +631,11 @@ class NotificationManager {
         } else {
             this.isEnabled = false;
             this.saveSettings();
+            // ページ内チェックを停止
+            if (this.pageCheckInterval) {
+                clearInterval(this.pageCheckInterval);
+                this.pageCheckInterval = null;
+            }
         }
         this.updateUI();
     }
@@ -600,7 +651,7 @@ class NotificationManager {
 
     saveSettings() {
         try {
-            localStorage.setItem('notificationEnabled', this.isEnabled.toString());
+            localStorage.setItem('notificationEnabled', this.isEnabled);
             localStorage.setItem('notificationTime', this.notificationTime);
         } catch (e) { console.log('Failed to save settings'); }
     }
@@ -636,6 +687,61 @@ class NotificationManager {
             type: 'SCHEDULE_DAILY_CHECK',
             time: this.notificationTime
         });
+        
+        // フォールバック: ページが開いている間は定期的にチェック
+        this.startInPageCheck();
+        
+        // Service Workerに特別日程データを送信
+        if (typeof specialScheduleManager !== 'undefined' && specialScheduleManager) {
+            const specialDatesObject = {};
+            specialScheduleManager.specialDates.forEach((value, key) => {
+                specialDatesObject[key] = value;
+            });
+            this.sendMessageToServiceWorker({
+                type: 'UPDATE_SPECIAL_DATES',
+                specialDates: specialDatesObject
+            });
+        }
+    }
+
+    // ページ内での定期チェック（フォールバック）
+    startInPageCheck() {
+        // 既存のインターバルをクリア
+        if (this.pageCheckInterval) {
+            clearInterval(this.pageCheckInterval);
+        }
+        
+        // 30分ごとにチェック
+        this.pageCheckInterval = setInterval(() => {
+            this.checkNotificationTime();
+        }, 30 * 60 * 1000); // 30分
+        
+        // 即座に一度チェック
+        this.checkNotificationTime();
+    }
+
+    async checkNotificationTime() {
+        const now = new Date();
+        const [hours, minutes] = this.notificationTime.split(':').map(Number);
+        const currentHour = now.getHours();
+        const currentMinute = now.getMinutes();
+        
+        // 設定時刻の前後15分以内
+        const targetMinutes = hours * 60 + minutes;
+        const currentMinutes = currentHour * 60 + currentMinute;
+        const timeDiff = Math.abs(currentMinutes - targetMinutes);
+        
+        if (timeDiff <= 15) {
+            const lastNotification = localStorage.getItem('lastNotificationDate');
+            const today = now.toDateString();
+            
+            if (lastNotification !== today) {
+                console.log('通知時刻になりました。Service Workerに通知を送信します。');
+                // Service Workerに通知を送信
+                this.sendMessageToServiceWorker({ type: 'CHECK_GARBAGE_NOW' });
+                localStorage.setItem('lastNotificationDate', today);
+            }
+        }
     }
 }
 
@@ -803,16 +909,40 @@ class SpecialScheduleUI {
 // ---------------------------------------------------------------------------------
 let specialScheduleManager;
 let specialScheduleUI;
+let notificationManager;
 
+// アプリ起動時に通知チェック
 document.addEventListener('DOMContentLoaded', () => {
     specialScheduleManager = new SpecialScheduleManager();
     specialScheduleUI = new SpecialScheduleUI(specialScheduleManager);
     
     const pwaManager = new PWAManager();
-    const notificationManager = new NotificationManager();
+    notificationManager = new NotificationManager();
     
     updateCalendar();
     setInterval(updateCalendar, 60000);
+    
+    // 起動時に通知時刻を確認
+    setTimeout(() => {
+        const now = new Date();
+        const notificationTime = localStorage.getItem('notificationTime') || '07:00';
+        const [hours, minutes] = notificationTime.split(':').map(Number);
+        
+        // 現在時刻が通知時刻を過ぎていて、今日まだ通知していない場合
+        if (now.getHours() >= hours && now.getMinutes() >= minutes) {
+            const lastNotification = localStorage.getItem('lastNotificationDate');
+            const today = now.toDateString();
+            
+            if (lastNotification !== today) {
+                console.log('通知時刻を過ぎているため、今すぐ通知を表示します');
+                if (window.notificationManager) {
+                    window.notificationManager.sendMessageToServiceWorker({ 
+                        type: 'CHECK_GARBAGE_NOW' 
+                    });
+                }
+            }
+        }
+    }, 3000); // 3秒後に実行
     
     // ★★★★★ ここが今回の修正点 ★★★★★
     // 擬似的な月1自動チェック機能

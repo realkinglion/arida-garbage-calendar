@@ -24,13 +24,13 @@ self.addEventListener('install', (event) => {
 });
 
 // Service Worker 有効化
-self.addEventListener('activate', (event) => {
+self.addEventListener('activate', async (event) => {
   console.log('Service Worker activating...');
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
+          if (cacheName !== CACHE_NAME && cacheName !== 'notification-settings') {
             return caches.delete(cacheName);
           }
         })
@@ -38,6 +38,8 @@ self.addEventListener('activate', (event) => {
     }).then(() => {
       console.log('Service Worker activated');
       loadSpecialDates();
+      // 定期チェックを開始
+      startPeriodicCheck();
       return self.clients.claim();
     })
   );
@@ -106,11 +108,15 @@ self.addEventListener('periodicsync', (event) => {
 });
 
 // メッセージ受信（アプリからの指示）
-self.addEventListener('message', (event) => {
+self.addEventListener('message', async (event) => {
   console.log('Message received:', event.data);
   
-  if (event.data && event.data.type === 'SCHEDULE_NOTIFICATION') {
-    scheduleNotification(event.data.time, event.data.message);
+  if (event.data && event.data.type === 'SCHEDULE_DAILY_CHECK') {
+    // 設定時間を保存
+    await saveNotificationTime(event.data.time);
+    
+    // 定期チェックを開始
+    startPeriodicCheck();
   }
   
   if (event.data && event.data.type === 'TEST_NOTIFICATION') {
@@ -125,6 +131,91 @@ self.addEventListener('message', (event) => {
     updateSpecialDates(event.data.specialDates);
   }
 });
+
+// 通知時間を保存
+async function saveNotificationTime(time) {
+  const cache = await caches.open('notification-settings');
+  const response = new Response(JSON.stringify({ time: time }));
+  await cache.put('/notification-time', response);
+}
+
+// 保存された通知時間を取得
+async function getNotificationTime() {
+  try {
+    const cache = await caches.open('notification-settings');
+    const response = await cache.match('/notification-time');
+    if (response) {
+      const data = await response.json();
+      return data.time;
+    }
+  } catch (e) {
+    console.error('Failed to get notification time:', e);
+  }
+  return '07:00'; // デフォルト
+}
+
+// 定期的なチェック（1時間ごと）
+function startPeriodicCheck() {
+  // 既存のインターバルをクリア
+  if (self.periodicCheckInterval) {
+    clearInterval(self.periodicCheckInterval);
+  }
+  
+  // 即座に一度チェック
+  checkAndNotify();
+  
+  // 1時間ごとにチェック
+  self.periodicCheckInterval = setInterval(() => {
+    checkAndNotify();
+  }, 60 * 60 * 1000); // 1時間
+}
+
+// 通知時間をチェックして必要なら通知
+async function checkAndNotify() {
+  const notificationTime = await getNotificationTime();
+  const now = new Date();
+  const [hours, minutes] = notificationTime.split(':').map(Number);
+  
+  // 現在時刻が通知時刻の範囲内（前後30分）かチェック
+  const currentHour = now.getHours();
+  const currentMinute = now.getMinutes();
+  
+  // 通知時刻の30分前から30分後までの範囲
+  const targetTime = hours * 60 + minutes;
+  const currentTime = currentHour * 60 + currentMinute;
+  const timeDiff = Math.abs(targetTime - currentTime);
+  
+  // 最後の通知時刻を確認
+  const lastNotificationDate = await getLastNotificationDate();
+  const today = now.toDateString();
+  
+  // 今日まだ通知していない かつ 時間が近い場合
+  if (lastNotificationDate !== today && timeDiff <= 30) {
+    await performDailyCheck();
+    await saveLastNotificationDate(today);
+  }
+}
+
+// 最後の通知日を保存
+async function saveLastNotificationDate(date) {
+  const cache = await caches.open('notification-settings');
+  const response = new Response(date);
+  await cache.put('/last-notification-date', response);
+}
+
+// 最後の通知日を取得
+async function getLastNotificationDate() {
+  try {
+    const cache = await caches.open('notification-settings');
+    const response = await cache.match('/last-notification-date');
+    if (response) {
+      return await response.text();
+    }
+  } catch (e) {
+    console.error('Failed to get last notification date:', e);
+  }
+  return null;
+}
 
 // 特別日程データの読み込み
 function loadSpecialDates() {
@@ -166,7 +257,9 @@ function setDefaultHolidaySchedule() {
 // 特別日程データの更新
 function updateSpecialDates(newSpecialDates) {
   try {
-    specialDates = new Map(Object.entries(newSpecialDates));
+    specialDates = new Map(Object.entries(newSpecialDates).map(([date, data]) => {
+      return [date, data.types || []];
+    }));
     console.log('特別日程を更新しました:', specialDates.size, '件');
   } catch (error) {
     console.log('特別日程の更新に失敗:', error);
@@ -267,34 +360,6 @@ async function showTestNotification() {
   ]);
   
   await self.registration.showNotification(title, options);
-}
-
-// 通知のスケジューリング（Androidタイマー対応）
-function scheduleNotification(targetTime, message) {
-  console.log('Scheduling notification for:', targetTime);
-  
-  const now = new Date();
-  const [hours, minutes] = targetTime.split(':').map(Number);
-  const targetDate = new Date();
-  targetDate.setHours(hours, minutes, 0, 0);
-  
-  // 今日の時間が過ぎていたら明日に設定
-  if (targetDate <= now) {
-    targetDate.setDate(targetDate.getDate() + 1);
-  }
-  
-  const delay = targetDate.getTime() - now.getTime();
-  
-  // 最大遅延時間の制限（Android対応）
-  const maxDelay = 24 * 60 * 60 * 1000; // 24時間
-  
-  if (delay > 0 && delay <= maxDelay) {
-    setTimeout(() => {
-      performDailyCheck();
-    }, delay);
-    
-    console.log('Notification scheduled for:', targetDate, 'Delay:', delay);
-  }
 }
 
 // 特別日程を取得
