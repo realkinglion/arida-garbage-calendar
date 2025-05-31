@@ -275,7 +275,16 @@ function createNotificationOptions(body, tag, actions = []) {
     tag: tag,
     requireInteraction: true,
     silent: false,
-    vibrate: [500, 110, 500, 110, 450, 110, 200, 110, 170, 40, 450, 110, 200, 110, 170, 40, 500],
+    // 緊急アラート風の派手なバイブレーションパターン！
+    vibrate: [
+      1000, 200,  // ブーーー（長い振動）
+      1000, 200,  // ブーーー
+      1000, 200,  // ブーーー
+      500, 100, 500, 100, 500, 100,  // ブッブッブッ（短い振動3回）
+      1000, 200,  // ブーーー
+      1000, 200,  // ブーーー
+      1000, 200   // ブーーー（フィニッシュ）
+    ],
     timestamp: Date.now(),
     renotify: true,
     actions: actions.length > 0 ? actions : [
@@ -352,7 +361,7 @@ async function showTestNotification() {
   console.log('Showing test notification with special schedule support...');
   
   const title = '🗑️ テスト通知（特別日程対応版）';
-  const body = '📢 Android PWA通知が正常に動作しています！\n\n✅ 音とバイブレーションのテスト\n✅ 詳細情報の表示テスト\n📅 年末年始の特別日程対応\n📱 この通知が見えて音が鳴れば設定完了です！\n\n🗑️ 特別日程機能が有効になっています';
+  const body = '📢 Android PWA通知が正常に動作しています！\n\n✅ 音とバイブレーションのテスト\n✅ 派手なバイブレーションパターン！\n📅 年末年始の特別日程対応\n📱 この通知が見えて振動を感じれば設定完了です！\n\n🗑️ 特別日程機能が有効になっています';
   
   const options = createNotificationOptions(body, 'test-notification', [
     { action: 'test-ok', title: '動作確認OK', icon: './icon-64x64.png' },
