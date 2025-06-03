@@ -12,6 +12,77 @@ const garbageSchedule = {
     petBottles: [4] // 木曜(4) - 第2,4週
 };
 
+// ★★★ ここから新しいクラスを追加 ★★★
+// ---------------------------------------------------------------------------------
+// Googleカレンダー連携管理クラス
+// ---------------------------------------------------------------------------------
+class GoogleCalendarManager {
+    createUrl(date, garbageList) {
+        if (!date || garbageList.length === 0) {
+            return null;
+        }
+
+        const baseUrl = 'https://www.google.com/calendar/render?action=TEMPLATE';
+
+        // イベントタイトルを作成
+        const title = '🗑️ ゴミ出しの日: ' + garbageList.map(g => g.name).join('、');
+
+        // 終日イベントとして設定
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const nextDay = String(date.getDate() + 1).padStart(2, '0'); // 終日イベントのため翌日を指定
+        // ToDo: 月末の場合の考慮を簡略化するため、Googleカレンダー側でよしなに解釈してくれる形式にする
+        const startDate = `${year}${month}${day}`;
+        
+        let nextDate = new Date(date);
+        nextDate.setDate(nextDate.getDate() + 1);
+        const nextYear = nextDate.getFullYear();
+        const nextMonth = String(nextDate.getMonth() + 1).padStart(2, '0');
+        const nextDayStr = String(nextDate.getDate()).padStart(2, '0');
+        const endDate = `${nextYear}${nextMonth}${nextDayStr}`;
+
+        const dates = `${startDate}/${endDate}`;
+
+        // 詳細情報を作成
+        const details = `収集日です。\n収集時間: 18:00〜21:00\n忘れずにゴミを出しましょう。\n\n※この予定は「有田市ゴミ出しカレンダー」アプリから作成されました。`;
+
+        // パラメータをエンコード
+        const params = new URLSearchParams({
+            text: title,
+            dates: dates,
+            details: details,
+            location: '指定の収集場所',
+            sf: 'true',
+            output: 'xml'
+        });
+
+        return `${baseUrl}&${params.toString()}`;
+    }
+
+    renderButton(containerId, date, garbageList) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        container.innerHTML = ''; // 一旦コンテナを空にする
+
+        if (garbageList.length > 0) {
+            const url = this.createUrl(date, garbageList);
+            if (url) {
+                const button = document.createElement('a');
+                button.href = url;
+                button.textContent = '📅 Googleカレンダーに追加';
+                button.className = 'calendar-button';
+                button.target = '_blank'; // 新しいタブで開く
+                button.rel = 'noopener noreferrer';
+                container.appendChild(button);
+            }
+        }
+    }
+}
+// ★★★ 追加ここまで ★★★
+
+
 // ---------------------------------------------------------------------------------
 // 2. 完璧版自動取得システム (CORSプロキシ並列化・HTML解析強化版)
 // ---------------------------------------------------------------------------------
@@ -385,16 +456,20 @@ function displayGarbage(garbage, elementId, isToday = true) {
     }
 }
 
+// ★★★ ここから関数を修正 ★★★
 function updateCalendar() {
     const today = new Date();
+    today.setHours(0,0,0,0); // 時間をリセットして日付のみで比較
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     const options = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
-    document.getElementById('todayDate').textContent = today.toLocaleDateString('ja-JP', options);
+    document.getElementById('todayDate').textContent = new Date().toLocaleDateString('ja-JP', options); // 表示は現在時刻のまま
 
+    // 今日のゴミ
     const todayGarbage = getTodayGarbage(today);
     displayGarbage(todayGarbage, 'todayGarbage', true);
+    googleCalendarManager.renderButton('todayCalendarButtonContainer', today, todayGarbage);
     
     const todayDetails = specialScheduleManager.getSpecialScheduleDetails(today);
     if (todayDetails && todayDetails.note) {
@@ -402,8 +477,10 @@ function updateCalendar() {
         todayElement.innerHTML += `<div class="special-note">📅 ${todayDetails.note}</div>`;
     }
 
+    // 明日のゴミ
     const tomorrowGarbage = getTodayGarbage(tomorrow);
     displayGarbage(tomorrowGarbage, 'tomorrowGarbage', false);
+    googleCalendarManager.renderButton('tomorrowCalendarButtonContainer', tomorrow, tomorrowGarbage);
     
     const tomorrowDetails = specialScheduleManager.getSpecialScheduleDetails(tomorrow);
     if (tomorrowDetails && tomorrowDetails.note) {
@@ -413,6 +490,7 @@ function updateCalendar() {
 
     updateSpecialScheduleDisplay();
 }
+// ★★★ 修正ここまで ★★★
 
 function updateSpecialScheduleDisplay() {
     const container = document.getElementById('specialScheduleList');
@@ -573,7 +651,6 @@ class NotificationManager {
         this.isEnabled = false;
         this.notificationTime = '07:00';
         this.serviceWorkerRegistration = null;
-        this.pageCheckInterval = null;
         this.init();
     }
 
@@ -597,12 +674,20 @@ class NotificationManager {
         timeInput.addEventListener('change', (e) => this.updateTime(e.target.value));
 
         this.setupServiceWorkerCommunication();
+        
+        this.scheduleDailyCheck();
     }
 
     async setupServiceWorkerCommunication() {
         if (!('serviceWorker' in navigator)) return;
         navigator.serviceWorker.addEventListener('message', (event) => {
             console.log('Message from Service Worker:', event.data);
+            if (event.data && event.data.type === 'NOTIFICATION_STATUS') {
+                 const status = document.getElementById('notificationStatus');
+                 if (status) {
+                     status.innerHTML += `<br><small>SW: ${event.data.message}</small>`;
+                 }
+            }
         });
     }
 
@@ -627,26 +712,21 @@ class NotificationManager {
                 await this.showTestNotification();
             } else {
                 alert('通知が許可されませんでした。ブラウザの設定を確認してください。');
+                this.isEnabled = false;
             }
         } else {
             this.isEnabled = false;
             this.saveSettings();
-            // ページ内チェックを停止
-            if (this.pageCheckInterval) {
-                clearInterval(this.pageCheckInterval);
-                this.pageCheckInterval = null;
-            }
         }
         this.updateUI();
+        this.scheduleDailyCheck();
     }
 
     updateTime(time) {
         this.notificationTime = time;
         this.saveSettings();
         this.updateUI();
-        if (this.isEnabled) {
-            this.scheduleDailyCheck();
-        }
+        this.scheduleDailyCheck();
     }
 
     saveSettings() {
@@ -665,14 +745,15 @@ class NotificationManager {
             toggleBtn.textContent = '通知を無効にする';
             toggleBtn.classList.add('disabled');
             status.innerHTML = `✅ 通知が有効です（毎日 ${this.notificationTime} 頃に通知）`;
-            this.scheduleDailyCheck();
         } else {
             toggleBtn.textContent = '通知を有効にする';
             toggleBtn.classList.remove('disabled');
             if (currentPermission === 'denied') {
                 status.innerHTML = '❌ 通知がブロックされています。<br><small>ブラウザの設定から通知を許可してください。</small>';
+                 toggleBtn.disabled = true;
             } else {
                 status.textContent = '通知が無効です';
+                toggleBtn.disabled = false;
             }
         }
     }
@@ -682,16 +763,17 @@ class NotificationManager {
     }
     
     scheduleDailyCheck() {
-        console.log('Scheduling daily check with Service Worker.');
+        console.log('Sending schedule information to Service Worker.');
         this.sendMessageToServiceWorker({
             type: 'SCHEDULE_DAILY_CHECK',
+            enabled: this.isEnabled,
             time: this.notificationTime
         });
         
-        // フォールバック: ページが開いている間は定期的にチェック
-        this.startInPageCheck();
-        
-        // Service Workerに特別日程データを送信
+        this.updateSpecialDatesInServiceWorker();
+    }
+
+    updateSpecialDatesInServiceWorker() {
         if (typeof specialScheduleManager !== 'undefined' && specialScheduleManager) {
             const specialDatesObject = {};
             specialScheduleManager.specialDates.forEach((value, key) => {
@@ -701,46 +783,6 @@ class NotificationManager {
                 type: 'UPDATE_SPECIAL_DATES',
                 specialDates: specialDatesObject
             });
-        }
-    }
-
-    // ページ内での定期チェック（フォールバック）
-    startInPageCheck() {
-        // 既存のインターバルをクリア
-        if (this.pageCheckInterval) {
-            clearInterval(this.pageCheckInterval);
-        }
-        
-        // 30分ごとにチェック
-        this.pageCheckInterval = setInterval(() => {
-            this.checkNotificationTime();
-        }, 30 * 60 * 1000); // 30分
-        
-        // 即座に一度チェック
-        this.checkNotificationTime();
-    }
-
-    async checkNotificationTime() {
-        const now = new Date();
-        const [hours, minutes] = this.notificationTime.split(':').map(Number);
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        
-        // 設定時刻の前後15分以内
-        const targetMinutes = hours * 60 + minutes;
-        const currentMinutes = currentHour * 60 + currentMinute;
-        const timeDiff = Math.abs(currentMinutes - targetMinutes);
-        
-        if (timeDiff <= 15) {
-            const lastNotification = localStorage.getItem('lastNotificationDate');
-            const today = now.toDateString();
-            
-            if (lastNotification !== today) {
-                console.log('通知時刻になりました。Service Workerに通知を送信します。');
-                // Service Workerに通知を送信
-                this.sendMessageToServiceWorker({ type: 'CHECK_GARBAGE_NOW' });
-                localStorage.setItem('lastNotificationDate', today);
-            }
         }
     }
 }
@@ -794,6 +836,7 @@ class SpecialScheduleUI {
                 statusDiv.innerHTML = '✅ 新しい特別日程は見つかりませんでした。現在の日程は最新です。';
             }
             updateSpecialScheduleDisplay();
+            notificationManager.updateSpecialDatesInServiceWorker();
         } catch (error) {
             console.error('取得エラー:', error);
             statusDiv.innerHTML = `❌ 取得に失敗しました。<br><small>時間をおいて再度試すか、手動で設定してください。</small>`;
@@ -857,6 +900,7 @@ class SpecialScheduleUI {
         
         this.manager.setSpecialDate(dateInput.value, types, '手動設定');
         updateSpecialScheduleDisplay();
+        notificationManager.updateSpecialDatesInServiceWorker();
         alert('特別日程を追加しました');
     }
 
@@ -894,6 +938,7 @@ class SpecialScheduleUI {
                 const dateToDelete = e.target.dataset.date;
                 if (confirm(`${dateToDelete}の特別日程を削除しますか？`)) {
                     this.manager.removeSpecialDate(dateToDelete);
+                    notificationManager.updateSpecialDatesInServiceWorker();
                     dialog.remove();
                     this.showScheduleList();
                     updateSpecialScheduleDisplay();
@@ -910,11 +955,12 @@ class SpecialScheduleUI {
 let specialScheduleManager;
 let specialScheduleUI;
 let notificationManager;
+let googleCalendarManager; // ★★★ 変数を追加 ★★★
 
-// アプリ起動時に通知チェック
 document.addEventListener('DOMContentLoaded', () => {
     specialScheduleManager = new SpecialScheduleManager();
     specialScheduleUI = new SpecialScheduleUI(specialScheduleManager);
+    googleCalendarManager = new GoogleCalendarManager(); // ★★★ インスタンスを生成 ★★★
     
     const pwaManager = new PWAManager();
     notificationManager = new NotificationManager();
@@ -922,41 +968,16 @@ document.addEventListener('DOMContentLoaded', () => {
     updateCalendar();
     setInterval(updateCalendar, 60000);
     
-    // 起動時に通知時刻を確認
-    setTimeout(() => {
-        const now = new Date();
-        const notificationTime = localStorage.getItem('notificationTime') || '07:00';
-        const [hours, minutes] = notificationTime.split(':').map(Number);
-        
-        // 現在時刻が通知時刻を過ぎていて、今日まだ通知していない場合
-        if (now.getHours() >= hours && now.getMinutes() >= minutes) {
-            const lastNotification = localStorage.getItem('lastNotificationDate');
-            const today = now.toDateString();
-            
-            if (lastNotification !== today) {
-                console.log('通知時刻を過ぎているため、今すぐ通知を表示します');
-                if (window.notificationManager) {
-                    window.notificationManager.sendMessageToServiceWorker({ 
-                        type: 'CHECK_GARBAGE_NOW' 
-                    });
-                }
-            }
-        }
-    }, 3000); // 3秒後に実行
-    
-    // ★★★★★ ここが今回の修正点 ★★★★★
-    // 擬似的な月1自動チェック機能
+    // 月1回の自動チェック機能
     try {
         const lastFetchTimestamp = localStorage.getItem('lastSuccessfulFetch');
-        const oneMonthInMs = 30 * 24 * 60 * 60 * 1000; // 30日をミリ秒で表現
+        const oneMonthInMs = 30 * 24 * 60 * 60 * 1000;
         
-        // 最終取得日時がない、または30日以上経過している場合
         if (!lastFetchTimestamp || (Date.now() - parseInt(lastFetchTimestamp)) > oneMonthInMs) {
             console.log('最終取得から1ヶ月以上経過したため、自動更新を開始します。');
-            // 少し遅延させて実行し、メインの描画を妨げないようにする
             setTimeout(() => {
                 specialScheduleUI.performPerfectFetch();
-            }, 2000); // 2秒後に実行
+            }, 2000);
         } else {
             console.log('最終取得から1ヶ月以内です。自動更新はスキップします。');
         }

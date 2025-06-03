@@ -5,19 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>有田市ゴミ出しカレンダー</title>
     
-    <!-- GitHub Pages用のベースURL設定 -->
     <base href="/arida-garbage-calendar/">
     
-    <!-- PWA Manifest -->
     <link rel="manifest" href="manifest.json">
     
-    <!-- PWA用メタタグ -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="ゴミ出し">
     <link rel="apple-touch-icon" href="icon-192x192.png">
     
-    <!-- スタイルシート -->
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -34,11 +30,13 @@
             <div class="garbage-today">
                 <h3>今日のゴミ出し</h3>
                 <div id="todayGarbage"></div>
+                <div id="todayCalendarButtonContainer" class="calendar-button-container"></div>
             </div>
 
             <div class="garbage-today">
                 <h3>明日のゴミ出し</h3>
                 <div id="tomorrowGarbage"></div>
+                <div id="tomorrowCalendarButtonContainer" class="calendar-button-container"></div>
             </div>
         </div>
 
@@ -60,8 +58,6 @@
             </div>
             <div class="notification-status" id="notificationStatus">通知が無効です</div>
         </div>
-
-        <!-- 特別日程管理セクション（script.jsで自動追加されます） -->
 
         <div class="schedule-section">
             <h2 style="text-align: center; margin-bottom: 30px; color: #333;">収集スケジュール</h2>
