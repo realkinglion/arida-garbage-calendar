@@ -13,151 +13,6 @@ const garbageSchedule = {
 };
 
 // ---------------------------------------------------------------------------------
-// Googleカレンダー連携管理クラス
-// ---------------------------------------------------------------------------------
-class GoogleCalendarManager {
-    createUrl(date, garbageList) {
-        if (!date || garbageList.length === 0) {
-            return null;
-        }
-
-        const baseUrl = 'https://www.google.com/calendar/render?action=TEMPLATE';
-        const title = '🗑️ ゴミ出しの日: ' + garbageList.map(g => g.name).join('、');
-        
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const startDate = `${year}${month}${day}`;
-        
-        let nextDate = new Date(date);
-        nextDate.setDate(nextDate.getDate() + 1);
-        const nextYear = nextDate.getFullYear();
-        const nextMonth = String(nextDate.getMonth() + 1).padStart(2, '0');
-        const nextDayStr = String(nextDate.getDate()).padStart(2, '0');
-        const endDate = `${nextYear}${nextMonth}${nextDayStr}`;
-
-        const dates = `${startDate}/${endDate}`;
-        const details = `収集日です。\n収集時間: 18:00〜21:00\n忘れずにゴミを出しましょう。\n\n※この予定は「有田市ゴミ出しカレンダー」アプリから作成されました。`;
-
-        const params = new URLSearchParams({
-            text: title,
-            dates: dates,
-            details: details,
-            location: '指定の収集場所',
-            sf: 'true',
-            output: 'xml'
-        });
-
-        return `${baseUrl}&${params.toString()}`;
-    }
-
-    renderButton(containerId, date, garbageList) {
-        const container = document.getElementById(containerId);
-        if (!container) return;
-        container.innerHTML = '';
-        if (garbageList.length > 0) {
-            const url = this.createUrl(date, garbageList);
-            if (url) {
-                const button = document.createElement('a');
-                button.href = url;
-                button.textContent = '📅 Googleカレンダーに追加';
-                button.className = 'calendar-button';
-                button.target = '_blank';
-                button.rel = 'noopener noreferrer';
-                container.appendChild(button);
-            }
-        }
-    }
-}
-
-// ★★★ ここから新しいクラスを追加 ★★★
-// ---------------------------------------------------------------------------------
-// iCalendarファイル生成管理クラス
-// ---------------------------------------------------------------------------------
-class iCalendarManager {
-    // 1ヶ月分のiCalendarデータを生成する
-    generateICSForMonth(year, month) {
-        const events = [];
-        const startDate = new Date(year, month, 1);
-        const endDate = new Date(year, month + 1, 0); // その月の最終日
-
-        for (let d = startDate; d <= endDate; d.setDate(d.getDate() + 1)) {
-            const currentDate = new Date(d);
-            const garbageList = getTodayGarbage(currentDate);
-
-            if (garbageList.length > 0) {
-                events.push(this.createVEvent(currentDate, garbageList));
-            }
-        }
-
-        if (events.length === 0) {
-            return null; // イベントが一つもなければnullを返す
-        }
-
-        return [
-            'BEGIN:VCALENDAR',
-            'VERSION:2.0',
-            'PRODID:-//realkinglion//Arida Garbage Calendar//JA',
-            'CALSCALE:GREGORIAN',
-            ...events,
-            'END:VCALENDAR'
-        ].join('\r\n');
-    }
-
-    // 1日分のイベント(VEVENT)データを作成する
-    createVEvent(date, garbageList) {
-        const year = date.getFullYear();
-        const monthStr = (date.getMonth() + 1).toString().padStart(2, '0');
-        const dayStr = date.getDate().toString().padStart(2, '0');
-        const dateString = `${year}${monthStr}${dayStr}`;
-        
-        const tomorrow = new Date(date);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowYear = tomorrow.getFullYear();
-        const tomorrowMonthStr = (tomorrow.getMonth() + 1).toString().padStart(2, '0');
-        const tomorrowDayStr = tomorrow.getDate().toString().padStart(2, '0');
-        const tomorrowDateString = `${tomorrowYear}${tomorrowMonthStr}${tomorrowDayStr}`;
-
-        const summary = '🗑️ ' + garbageList.map(g => g.name).join('・');
-        const uid = `${dateString}@arida-garbage.realkinglion.github.io`;
-        const dtstamp = new Date().toISOString().replace(/[-:.]/g, '') + 'Z';
-        const description = '収集時間: 18:00〜21:00';
-
-        return [
-            'BEGIN:VEVENT',
-            `UID:${uid}`,
-            `DTSTAMP:${dtstamp}`,
-            `DTSTART;VALUE=DATE:${dateString}`,
-            `DTEND;VALUE=DATE:${tomorrowDateString}`,
-            `SUMMARY:${summary}`,
-            `DESCRIPTION:${description}`,
-            'END:VEVENT'
-        ].join('\r\n');
-    }
-
-    // ダウンロード処理をトリガーする
-    triggerDownload(year, month) {
-        const icsData = this.generateICSForMonth(year, month);
-        if (!icsData) {
-            alert('この月のゴミ出し予定はありませんでした。');
-            return;
-        }
-
-        const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `arida-garbage-schedule-${year}-${String(month + 1).padStart(2, '0')}.ics`;
-        
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    }
-}
-// ★★★ 追加ここまで ★★★
-
-// ---------------------------------------------------------------------------------
 // 2. 完璧版自動取得システム (CORSプロキシ並列化・HTML解析強化版)
 // ---------------------------------------------------------------------------------
 class PerfectScheduleFetcher {
@@ -486,7 +341,6 @@ function updateCalendar() {
     document.getElementById('todayDate').textContent = new Date().toLocaleDateString('ja-JP', options);
     const todayGarbage = getTodayGarbage(today);
     displayGarbage(todayGarbage, 'todayGarbage', true);
-    googleCalendarManager.renderButton('todayCalendarButtonContainer', today, todayGarbage);
     const todayDetails = specialScheduleManager.getSpecialScheduleDetails(today);
     if (todayDetails && todayDetails.note) {
         const todayElement = document.getElementById('todayGarbage');
@@ -494,7 +348,6 @@ function updateCalendar() {
     }
     const tomorrowGarbage = getTodayGarbage(tomorrow);
     displayGarbage(tomorrowGarbage, 'tomorrowGarbage', false);
-    googleCalendarManager.renderButton('tomorrowCalendarButtonContainer', tomorrow, tomorrowGarbage);
     const tomorrowDetails = specialScheduleManager.getSpecialScheduleDetails(tomorrow);
     if (tomorrowDetails && tomorrowDetails.note) {
         const tomorrowElement = document.getElementById('tomorrowGarbage');
@@ -912,38 +765,16 @@ class SpecialScheduleUI {
 let specialScheduleManager;
 let specialScheduleUI;
 let notificationManager;
-let googleCalendarManager;
-let iCalendarManager; // ★★★ 変数を追加 ★★★
 
 document.addEventListener('DOMContentLoaded', () => {
     specialScheduleManager = new SpecialScheduleManager();
     specialScheduleUI = new SpecialScheduleUI(specialScheduleManager);
-    googleCalendarManager = new GoogleCalendarManager();
-    iCalendarManager = new iCalendarManager(); // ★★★ インスタンスを生成 ★★★
     
     const pwaManager = new PWAManager();
     notificationManager = new NotificationManager();
     
     updateCalendar();
     setInterval(updateCalendar, 60000);
-    
-    // ★★★ 月間カレンダーの初期化とイベントリスナー設定 ★★★
-    const monthInput = document.getElementById('calendarMonth');
-    const downloadBtn = document.getElementById('downloadIcsButton');
-
-    // 月選択インプットに現在の月を設定
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    monthInput.value = `${year}-${month}`;
-
-    // ダウンロードボタンのクリックイベント
-    downloadBtn.addEventListener('click', () => {
-        const [selectedYear, selectedMonth] = monthInput.value.split('-').map(Number);
-        // monthは0-11で扱うため、1を引く
-        iCalendarManager.triggerDownload(selectedYear, selectedMonth - 1);
-    });
-    // ★★★ 初期化ここまで ★★★
 
     // 月1回の自動チェック機能
     try {
