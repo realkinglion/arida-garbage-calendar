@@ -1,7 +1,7 @@
 // =================================================================================
 // Service Worker for Garbage Calendar (v5 - Robust Scheduling)
 // =================================================================================
-const CACHE_NAME = 'garbage-calendar-v6'; // Cache version updated
+const CACHE_NAME = 'garbage-calendar-v10'; // Cache version updated
 const REPO_NAME = '/arida-garbage-calendar/'; // Your GitHub repository name
 
 const urlsToCache = [

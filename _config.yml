@@ -1,15 +1,15 @@
-# GitHub Pagesİ’è
+# GitHub Pagesè¨­å®š
 theme: null
 plugins: []
 
-# ƒtƒ@ƒCƒ‹‚ğœŠO‚µ‚È‚¢İ’è
+# ãƒ•ã‚¡ã‚¤ãƒ«ã‚’é™¤å¤–ã—ãªã„è¨­å®š
 include:
   - service-worker.js
   - manifest.json
   - _*
 
-# ƒLƒƒƒbƒVƒ…–³Œø‰»‚Ì‚½‚ß‚ÌƒNƒGƒŠƒpƒ‰ƒ[ƒ^’Ç‰Á
-# ‚±‚ê‚É‚æ‚èService Worker‚ÌXV‚ªŠmÀ‚És‚í‚ê‚é
+# ã‚­ãƒ£ãƒƒã‚·ãƒ¥ç„¡åŠ¹åŒ–ã®ãŸã‚ã®ã‚¯ã‚¨ãƒªãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿è¿½åŠ 
+# ã“ã‚Œã«ã‚ˆã‚ŠService Workerã®æ›´æ–°ãŒç¢ºå®Ÿã«è¡Œã‚ã‚Œã‚‹
 defaults:
   - scope:
       path: "service-worker.js"
