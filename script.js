@@ -12,7 +12,6 @@ const garbageSchedule = {
     petBottles: [4] // 木曜(4) - 第2,4週
 };
 
-// ★★★ ここから新しいクラスを追加 ★★★
 // ---------------------------------------------------------------------------------
 // Googleカレンダー連携管理クラス
 // ---------------------------------------------------------------------------------
@@ -23,16 +22,11 @@ class GoogleCalendarManager {
         }
 
         const baseUrl = 'https://www.google.com/calendar/render?action=TEMPLATE';
-
-        // イベントタイトルを作成
         const title = '🗑️ ゴミ出しの日: ' + garbageList.map(g => g.name).join('、');
-
-        // 終日イベントとして設定
+        
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const day = String(date.getDate()).padStart(2, '0');
-        const nextDay = String(date.getDate() + 1).padStart(2, '0'); // 終日イベントのため翌日を指定
-        // ToDo: 月末の場合の考慮を簡略化するため、Googleカレンダー側でよしなに解釈してくれる形式にする
         const startDate = `${year}${month}${day}`;
         
         let nextDate = new Date(date);
@@ -43,11 +37,8 @@ class GoogleCalendarManager {
         const endDate = `${nextYear}${nextMonth}${nextDayStr}`;
 
         const dates = `${startDate}/${endDate}`;
-
-        // 詳細情報を作成
         const details = `収集日です。\n収集時間: 18:00〜21:00\n忘れずにゴミを出しましょう。\n\n※この予定は「有田市ゴミ出しカレンダー」アプリから作成されました。`;
 
-        // パラメータをエンコード
         const params = new URLSearchParams({
             text: title,
             dates: dates,
@@ -63,9 +54,7 @@ class GoogleCalendarManager {
     renderButton(containerId, date, garbageList) {
         const container = document.getElementById(containerId);
         if (!container) return;
-
-        container.innerHTML = ''; // 一旦コンテナを空にする
-
+        container.innerHTML = '';
         if (garbageList.length > 0) {
             const url = this.createUrl(date, garbageList);
             if (url) {
@@ -73,15 +62,100 @@ class GoogleCalendarManager {
                 button.href = url;
                 button.textContent = '📅 Googleカレンダーに追加';
                 button.className = 'calendar-button';
-                button.target = '_blank'; // 新しいタブで開く
+                button.target = '_blank';
                 button.rel = 'noopener noreferrer';
                 container.appendChild(button);
             }
         }
     }
 }
-// ★★★ 追加ここまで ★★★
 
+// ★★★ ここから新しいクラスを追加 ★★★
+// ---------------------------------------------------------------------------------
+// iCalendarファイル生成管理クラス
+// ---------------------------------------------------------------------------------
+class iCalendarManager {
+    // 1ヶ月分のiCalendarデータを生成する
+    generateICSForMonth(year, month) {
+        const events = [];
+        const startDate = new Date(year, month, 1);
+        const endDate = new Date(year, month + 1, 0); // その月の最終日
+
+        for (let d = startDate; d <= endDate; d.setDate(d.getDate() + 1)) {
+            const currentDate = new Date(d);
+            const garbageList = getTodayGarbage(currentDate);
+
+            if (garbageList.length > 0) {
+                events.push(this.createVEvent(currentDate, garbageList));
+            }
+        }
+
+        if (events.length === 0) {
+            return null; // イベントが一つもなければnullを返す
+        }
+
+        return [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//realkinglion//Arida Garbage Calendar//JA',
+            'CALSCALE:GREGORIAN',
+            ...events,
+            'END:VCALENDAR'
+        ].join('\r\n');
+    }
+
+    // 1日分のイベント(VEVENT)データを作成する
+    createVEvent(date, garbageList) {
+        const year = date.getFullYear();
+        const monthStr = (date.getMonth() + 1).toString().padStart(2, '0');
+        const dayStr = date.getDate().toString().padStart(2, '0');
+        const dateString = `${year}${monthStr}${dayStr}`;
+        
+        const tomorrow = new Date(date);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowYear = tomorrow.getFullYear();
+        const tomorrowMonthStr = (tomorrow.getMonth() + 1).toString().padStart(2, '0');
+        const tomorrowDayStr = tomorrow.getDate().toString().padStart(2, '0');
+        const tomorrowDateString = `${tomorrowYear}${tomorrowMonthStr}${tomorrowDayStr}`;
+
+        const summary = '🗑️ ' + garbageList.map(g => g.name).join('・');
+        const uid = `${dateString}@arida-garbage.realkinglion.github.io`;
+        const dtstamp = new Date().toISOString().replace(/[-:.]/g, '') + 'Z';
+        const description = '収集時間: 18:00〜21:00';
+
+        return [
+            'BEGIN:VEVENT',
+            `UID:${uid}`,
+            `DTSTAMP:${dtstamp}`,
+            `DTSTART;VALUE=DATE:${dateString}`,
+            `DTEND;VALUE=DATE:${tomorrowDateString}`,
+            `SUMMARY:${summary}`,
+            `DESCRIPTION:${description}`,
+            'END:VEVENT'
+        ].join('\r\n');
+    }
+
+    // ダウンロード処理をトリガーする
+    triggerDownload(year, month) {
+        const icsData = this.generateICSForMonth(year, month);
+        if (!icsData) {
+            alert('この月のゴミ出し予定はありませんでした。');
+            return;
+        }
+
+        const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `arida-garbage-schedule-${year}-${String(month + 1).padStart(2, '0')}.ics`;
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+}
+// ★★★ 追加ここまで ★★★
 
 // ---------------------------------------------------------------------------------
 // 2. 完璧版自動取得システム (CORSプロキシ並列化・HTML解析強化版)
@@ -89,12 +163,10 @@ class GoogleCalendarManager {
 class PerfectScheduleFetcher {
     constructor() {
         this.aridaCityUrl = 'https://www.city.arida.lg.jp/kurashi/gomikankyo/gomibunbetsu/1000951/1000954.html';
-        
         this.proxyUrls = [
             'https://corsproxy.io/?',
             'https://api.allorigins.win/get?url='
         ];
-
         this.garbageImageMapping = {
             'gomi01.png': { type: 'burnable', name: '可燃ごみ' },
             'gomi02.png': { type: 'bottles-plastic', name: 'びん類・プラスチック類' },
@@ -102,15 +174,12 @@ class PerfectScheduleFetcher {
             'gomi04.png': { type: 'pet-bottles', name: 'ペットボトル' }
         };
     }
-
     async fetchHtmlContent() {
         console.log('📡 HTMLコンテンツ取得中 (並列実行)...');
-
         const fetchPromises = this.proxyUrls.map(proxyUrl => {
             const requestUrl = proxyUrl.includes('allorigins')
                 ? proxyUrl + encodeURIComponent(this.aridaCityUrl)
                 : proxyUrl + this.aridaCityUrl;
-
             return fetch(requestUrl).then(async (response) => {
                 if (!response.ok) {
                     throw new Error(`プロキシエラー: ${response.status} at ${proxyUrl}`);
@@ -125,7 +194,6 @@ class PerfectScheduleFetcher {
                 return response.text();
             });
         });
-
         try {
             const htmlContent = await Promise.any(fetchPromises);
             console.log('✅ HTML取得成功 (一番速いプロキシを使用)');
@@ -135,12 +203,10 @@ class PerfectScheduleFetcher {
             throw new Error('全てのプロキシで取得に失敗');
         }
     }
-
     extractScheduleFromHtml(htmlContent) {
         console.log('🔍 HTML解析中...');
         const parser = new DOMParser();
         const doc = parser.parseFromString(htmlContent, 'text/html');
-
         let currentYear;
         const caption = doc.querySelector('table.gomi caption');
         if (caption) {
@@ -156,32 +222,26 @@ class PerfectScheduleFetcher {
             console.warn(`HTMLから年を特定できませんでした。現在の年(${currentYear})を使用します。`);
         }
         console.log(`📅 解析対象の年: ${currentYear}`);
-
         const scheduleData = {
             year: currentYear,
             specialDates: new Map(),
             source: 'html_extraction',
             confidence: 0.95
         };
-
         const tables = doc.querySelectorAll('table.gomi');
         if (tables.length === 0) {
             console.error('❌ 解析対象のテーブルが見つかりませんでした。');
             scheduleData.confidence = 0.1;
             return scheduleData;
         }
-
         tables.forEach(table => {
             const monthCaption = table.querySelector('caption span');
             if (!monthCaption) return;
-
             const month = parseInt(monthCaption.textContent.replace('月', ''), 10);
             if (isNaN(month)) return;
-
             const rows = table.querySelectorAll('tr');
             rows.forEach(row => {
                 if (row.querySelector('th')) return;
-
                 const cells = row.querySelectorAll('td');
                 cells.forEach(cell => {
                     const dayElement = cell.querySelector('strong');
@@ -189,7 +249,6 @@ class PerfectScheduleFetcher {
                     
                     const day = parseInt(dayElement.textContent.trim(), 10);
                     const dateString = `${currentYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
                     const garbageTypes = [];
                     const images = cell.querySelectorAll('img');
                     images.forEach(img => {
@@ -200,7 +259,6 @@ class PerfectScheduleFetcher {
                             garbageTypes.push(garbageInfo);
                         }
                     });
-
                     const normalGarbage = this.getNormalGarbageForDate(new Date(dateString));
                     if (!this.arraysEqual(garbageTypes, normalGarbage)) {
                         scheduleData.specialDates.set(dateString, garbageTypes);
@@ -208,16 +266,13 @@ class PerfectScheduleFetcher {
                 });
             });
         });
-
         console.log(`📊 ${scheduleData.specialDates.size}件の特別日程を発見`);
         return scheduleData;
     }
-    
     getNormalGarbageForDate(date) {
         const dayOfWeek = date.getDay();
         const weekOfMonth = getWeekOfMonth(date);
         const garbage = [];
-
         if (garbageSchedule.burnable.includes(dayOfWeek)) {
             garbage.push({ type: 'burnable', name: '可燃ごみ' });
         }
@@ -232,14 +287,12 @@ class PerfectScheduleFetcher {
         }
         return garbage;
     }
-
     arraysEqual(a, b) {
         if (a.length !== b.length) return false;
         const aTypes = a.map(g => g.type).sort();
         const bTypes = b.map(g => g.type).sort();
         return aTypes.every((val, index) => val === bTypes[index]);
     }
-
     getDefaultSchedule() {
         return {
             year: new Date().getFullYear(),
@@ -248,20 +301,17 @@ class PerfectScheduleFetcher {
             confidence: 0.1
         };
     }
-    
     updateSpecialSchedule(scheduleData) {
         if (scheduleData && scheduleData.specialDates) {
             scheduleData.specialDates.forEach((types, date) => {
                 const note = `自動取得 (${scheduleData.source}, 信頼度: ${Math.round(scheduleData.confidence * 100)}%)`;
                 specialScheduleManager.setSpecialDate(date, types, note);
             });
-            
             console.log(`✅ ${scheduleData.specialDates.size}件の特別日程を更新`);
             updateSpecialScheduleDisplay();
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------------
 // 3. 特別日程管理クラス (Gistフォールバック機能付き)
@@ -270,20 +320,15 @@ class SpecialScheduleManager {
     constructor() {
         this.specialDates = new Map();
         this.fetcher = new PerfectScheduleFetcher();
-        
-        // Gist URLを正しく設定
         this.gistFallbackUrl = 'https://gist.githubusercontent.com/realkinglion/4859d37c601e6f3b3a07cc049356234b/raw/a3834ed438c03cfd9b7d83d021f7bd142ca7429a/schedule.json';
-        
         this.loadSpecialDates();
     }
-
     async fetchLatestSchedule() {
         try {
             const htmlContent = await this.fetcher.fetchHtmlContent();
             const scheduleData = this.fetcher.extractScheduleFromHtml(htmlContent);
             this.fetcher.updateSpecialSchedule(scheduleData);
             console.log('✅ プロキシ経由での取得に成功');
-            // ★★★★★ 成功時に最終取得日時を記録 ★★★★★
             localStorage.setItem('lastSuccessfulFetch', Date.now().toString());
             return scheduleData;
         } catch (error) {
@@ -296,34 +341,28 @@ class SpecialScheduleManager {
                 const response = await fetch(this.gistFallbackUrl);
                 if (!response.ok) throw new Error('Gistサーバーからの応答が不正です');
                 const gistData = await response.json();
-                
                 const specialDatesMap = new Map();
                 if (gistData.specialDates) {
                     Object.entries(gistData.specialDates).forEach(([date, data]) => {
                         specialDatesMap.set(date, data.types || []);
                     });
                 }
-                
                 const scheduleData = {
                     year: gistData.year,
                     specialDates: specialDatesMap,
                     source: gistData.source,
                     confidence: 0.90
                 };
-
                 this.fetcher.updateSpecialSchedule(scheduleData);
                 console.log('✅ Gistからのフォールバック取得に成功');
-                // ★★★★★ 成功時に最終取得日時を記録 ★★★★★
                 localStorage.setItem('lastSuccessfulFetch', Date.now().toString());
                 return scheduleData;
-
             } catch (fallbackError) {
                 console.error('❌ Gistからのフォールバックも失敗しました。', fallbackError);
                 throw fallbackError;
             }
         }
     }
-
     loadSpecialDates() {
         try {
             const stored = localStorage.getItem('specialGarbageDates');
@@ -337,7 +376,6 @@ class SpecialScheduleManager {
         } catch (e) { console.log('特別日程の読み込みに失敗:', e); }
         this.setDefaultHolidaySchedule();
     }
-
     setDefaultHolidaySchedule() {
         const currentYear = new Date().getFullYear();
         const holidayChanges = [
@@ -348,14 +386,12 @@ class SpecialScheduleManager {
             { date: `${currentYear + 1}-01-02`, types: [], note: '年末年始' },
             { date: `${currentYear + 1}-01-03`, types: [], note: '年末年始' }
         ];
-
         holidayChanges.forEach(change => {
             if (!this.specialDates.has(change.date)) {
                 this.setSpecialDate(change.date, change.types, change.note);
             }
         });
     }
-
     setSpecialDate(dateString, garbageTypes, note = '') {
         const dateData = {
             types: garbageTypes,
@@ -366,12 +402,10 @@ class SpecialScheduleManager {
         this.specialDates.set(dateString, dateData);
         this.saveSpecialDates();
     }
-
     removeSpecialDate(dateString) {
         this.specialDates.delete(dateString);
         this.saveSpecialDates();
     }
-
     saveSpecialDates() {
         try {
             const data = {};
@@ -379,22 +413,18 @@ class SpecialScheduleManager {
             localStorage.setItem('specialGarbageDates', JSON.stringify(data));
         } catch (e) { console.log('特別日程の保存に失敗:', e); }
     }
-
     getSpecialSchedule(date) {
         const dateString = this.formatDate(date);
         const specialData = this.specialDates.get(dateString);
         return specialData ? specialData.types : null;
     }
-
     getSpecialScheduleDetails(date) {
         const dateString = this.formatDate(date);
         return this.specialDates.get(dateString) || null;
     }
-
     formatDate(date) {
         return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
     }
-
     getAllSpecialDates() {
         return Array.from(this.specialDates.entries()).map(([date, data]) => ({
             date,
@@ -406,7 +436,6 @@ class SpecialScheduleManager {
     }
 }
 
-
 // ---------------------------------------------------------------------------------
 // 4. UI更新 & スケジュール判定ロジック
 // ---------------------------------------------------------------------------------
@@ -416,17 +445,14 @@ function getWeekOfMonth(date) {
     const offsetDate = date.getDate() + firstWeekday - 1;
     return Math.floor(offsetDate / 7) + 1;
 }
-
 function getTodayGarbage(date) {
     const specialSchedule = specialScheduleManager.getSpecialSchedule(date);
     if (specialSchedule !== null) {
         return specialSchedule;
     }
-
     const dayOfWeek = date.getDay();
     const weekOfMonth = getWeekOfMonth(date);
     const garbage = [];
-
     if (garbageSchedule.burnable.includes(dayOfWeek)) {
         garbage.push({ type: 'burnable', name: '可燃ごみ' });
     }
@@ -441,65 +467,47 @@ function getTodayGarbage(date) {
     }
     return garbage;
 }
-
 function displayGarbage(garbage, elementId, isToday = true) {
     const element = document.getElementById(elementId);
     if (!element) return;
-    
     if (garbage.length === 0) {
         const message = isToday ? '今日はゴミ出しの日ではありません' : '明日はゴミ出し日に該当しません';
         element.innerHTML = `<span class="no-garbage">${message}</span>`;
     } else {
-        element.innerHTML = garbage.map(g => 
-            `<span class="garbage-type ${g.type}">${g.name}</span>`
-        ).join('');
+        element.innerHTML = garbage.map(g => `<span class="garbage-type ${g.type}">${g.name}</span>`).join('');
     }
 }
-
-// ★★★ ここから関数を修正 ★★★
 function updateCalendar() {
     const today = new Date();
-    today.setHours(0,0,0,0); // 時間をリセットして日付のみで比較
+    today.setHours(0,0,0,0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-
     const options = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
-    document.getElementById('todayDate').textContent = new Date().toLocaleDateString('ja-JP', options); // 表示は現在時刻のまま
-
-    // 今日のゴミ
+    document.getElementById('todayDate').textContent = new Date().toLocaleDateString('ja-JP', options);
     const todayGarbage = getTodayGarbage(today);
     displayGarbage(todayGarbage, 'todayGarbage', true);
     googleCalendarManager.renderButton('todayCalendarButtonContainer', today, todayGarbage);
-    
     const todayDetails = specialScheduleManager.getSpecialScheduleDetails(today);
     if (todayDetails && todayDetails.note) {
         const todayElement = document.getElementById('todayGarbage');
         todayElement.innerHTML += `<div class="special-note">📅 ${todayDetails.note}</div>`;
     }
-
-    // 明日のゴミ
     const tomorrowGarbage = getTodayGarbage(tomorrow);
     displayGarbage(tomorrowGarbage, 'tomorrowGarbage', false);
     googleCalendarManager.renderButton('tomorrowCalendarButtonContainer', tomorrow, tomorrowGarbage);
-    
     const tomorrowDetails = specialScheduleManager.getSpecialScheduleDetails(tomorrow);
     if (tomorrowDetails && tomorrowDetails.note) {
         const tomorrowElement = document.getElementById('tomorrowGarbage');
         tomorrowElement.innerHTML += `<div class="special-note">📅 ${tomorrowDetails.note}</div>`;
     }
-
     updateSpecialScheduleDisplay();
 }
-// ★★★ 修正ここまで ★★★
-
 function updateSpecialScheduleDisplay() {
     const container = document.getElementById('specialScheduleList');
     if (!container) return;
-
     const today = new Date();
     const currentMonth = today.getMonth();
     const currentYear = today.getFullYear();
-
     const specialDatesThisMonth = specialScheduleManager.getAllSpecialDates()
         .filter(item => {
             const itemDate = new Date(item.date);
@@ -507,7 +515,6 @@ function updateSpecialScheduleDisplay() {
             return itemDate.getFullYear() === currentYear && itemDate.getMonth() === currentMonth;
         })
         .sort((a, b) => new Date(a.date) - new Date(b.date));
-
     container.innerHTML = '<h4>今月の特別日程</h4>';
     if (specialDatesThisMonth.length > 0) {
         container.innerHTML += specialDatesThisMonth.map(item => {
@@ -522,7 +529,6 @@ function updateSpecialScheduleDisplay() {
         container.innerHTML += '<p>今月は変則的な収集スケジュールはありません。</p>';
     }
 }
-
 function createNotificationOptions(title, body, tag, includeActions = true) {
     const options = {
         body: body,
@@ -553,25 +559,19 @@ class PWAManager {
         this.deferredPrompt = null;
         this.init();
     }
-
     async init() {
         if ('serviceWorker' in navigator) {
             try {
-                // GitHub Pages対応: 明示的にスコープを指定
                 const registration = await navigator.serviceWorker.register('./service-worker.js', {
                     scope: './'
                 });
                 console.log('Service Worker registered:', registration);
                 console.log('Service Worker scope:', registration.scope);
-                
-                // 登録後、すぐにアクティブになるのを待つ
                 await navigator.serviceWorker.ready;
                 console.log('Service Worker is ready');
             } catch (error) {
                 console.error('Service Worker registration failed:', error);
                 console.error('詳細:', error.message);
-                
-                // エラーの詳細を表示
                 const pwaStatus = document.getElementById('pwaStatus');
                 if (pwaStatus) {
                     pwaStatus.textContent = 'Service Worker登録エラー: ' + error.message;
@@ -581,11 +581,9 @@ class PWAManager {
         }
         this.setupInstallPrompt();
     }
-
     setupInstallPrompt() {
         const installButton = document.getElementById('installButton');
         const pwaStatus = document.getElementById('pwaStatus');
-        
         window.addEventListener('beforeinstallprompt', (e) => {
             e.preventDefault();
             this.deferredPrompt = e;
@@ -593,34 +591,27 @@ class PWAManager {
             pwaStatus.textContent = 'アプリとしてインストール可能です';
             console.log('PWA インストール可能');
         });
-        
         installButton.addEventListener('click', async () => {
             if (!this.deferredPrompt) {
                 console.log('インストールプロンプトが利用できません');
                 return;
             }
-            
             this.deferredPrompt.prompt();
             const { outcome } = await this.deferredPrompt.userChoice;
-            
             if (outcome === 'accepted') {
                 pwaStatus.textContent = 'アプリがインストールされました！';
                 console.log('PWA インストール完了');
             } else {
                 console.log('PWA インストールがキャンセルされました');
             }
-            
             this.deferredPrompt = null;
             installButton.disabled = true;
         });
-        
         window.addEventListener('appinstalled', () => {
             pwaStatus.textContent = 'アプリが正常にインストールされました！';
             installButton.style.display = 'none';
             console.log('PWA インストール完了イベント');
         });
-        
-        // 1秒後に状態を確認
         setTimeout(() => {
             if (!this.deferredPrompt) {
                 if (window.matchMedia('(display-mode: standalone)').matches) {
@@ -628,7 +619,6 @@ class PWAManager {
                     installButton.style.display = 'none';
                     console.log('PWA スタンドアロンモードで実行中');
                 } else {
-                    // Service Workerの状態も確認
                     if ('serviceWorker' in navigator) {
                         navigator.serviceWorker.getRegistration().then(registration => {
                             if (registration) {
@@ -645,7 +635,6 @@ class PWAManager {
         }, 1000);
     }
 }
-
 class NotificationManager {
     constructor() {
         this.isEnabled = false;
@@ -653,31 +642,23 @@ class NotificationManager {
         this.serviceWorkerRegistration = null;
         this.init();
     }
-
     async init() {
         const toggleBtn = document.getElementById('notificationToggle');
         const timeInput = document.getElementById('notificationTime');
-
         try {
             this.isEnabled = localStorage.getItem('notificationEnabled') === 'true';
             this.notificationTime = localStorage.getItem('notificationTime') || '07:00';
         } catch (e) { console.log('LocalStorage not available'); }
-
         if ('serviceWorker' in navigator) {
             this.serviceWorkerRegistration = await navigator.serviceWorker.ready;
         }
-
         timeInput.value = this.notificationTime;
         this.updateUI();
-
         toggleBtn.addEventListener('click', () => this.toggleNotification());
         timeInput.addEventListener('change', (e) => this.updateTime(e.target.value));
-
         this.setupServiceWorkerCommunication();
-        
         this.scheduleDailyCheck();
     }
-
     async setupServiceWorkerCommunication() {
         if (!('serviceWorker' in navigator)) return;
         navigator.serviceWorker.addEventListener('message', (event) => {
@@ -690,7 +671,6 @@ class NotificationManager {
             }
         });
     }
-
     sendMessageToServiceWorker(message) {
         if (this.serviceWorkerRegistration && this.serviceWorkerRegistration.active) {
             this.serviceWorkerRegistration.active.postMessage(message);
@@ -698,7 +678,6 @@ class NotificationManager {
             console.error('Service Worker is not active, cannot send message.');
         }
     }
-
     async toggleNotification() {
         if (!this.isEnabled) {
             if (!('Notification' in window)) {
@@ -721,26 +700,22 @@ class NotificationManager {
         this.updateUI();
         this.scheduleDailyCheck();
     }
-
     updateTime(time) {
         this.notificationTime = time;
         this.saveSettings();
         this.updateUI();
         this.scheduleDailyCheck();
     }
-
     saveSettings() {
         try {
             localStorage.setItem('notificationEnabled', this.isEnabled);
             localStorage.setItem('notificationTime', this.notificationTime);
         } catch (e) { console.log('Failed to save settings'); }
     }
-
     updateUI() {
         const toggleBtn = document.getElementById('notificationToggle');
         const status = document.getElementById('notificationStatus');
         const currentPermission = Notification.permission;
-
         if (this.isEnabled && currentPermission === 'granted') {
             toggleBtn.textContent = '通知を無効にする';
             toggleBtn.classList.add('disabled');
@@ -757,11 +732,9 @@ class NotificationManager {
             }
         }
     }
-
     async showTestNotification() {
         this.sendMessageToServiceWorker({ type: 'TEST_NOTIFICATION' });
     }
-    
     scheduleDailyCheck() {
         console.log('Sending schedule information to Service Worker.');
         this.sendMessageToServiceWorker({
@@ -769,10 +742,8 @@ class NotificationManager {
             enabled: this.isEnabled,
             time: this.notificationTime
         });
-        
         this.updateSpecialDatesInServiceWorker();
     }
-
     updateSpecialDatesInServiceWorker() {
         if (typeof specialScheduleManager !== 'undefined' && specialScheduleManager) {
             const specialDatesObject = {};
@@ -787,7 +758,6 @@ class NotificationManager {
     }
 }
 
-
 // ---------------------------------------------------------------------------------
 // 6. 特別日程管理UI
 // ---------------------------------------------------------------------------------
@@ -796,7 +766,6 @@ class SpecialScheduleUI {
         this.manager = manager;
         this.setupUI();
     }
-
     setupUI() {
         const container = document.querySelector('.container');
         const scheduleSection = document.createElement('div');
@@ -814,20 +783,16 @@ class SpecialScheduleUI {
             </div>`;
         const notificationSection = document.querySelector('.notification-section');
         container.insertBefore(scheduleSection, notificationSection.nextSibling);
-
         document.getElementById('perfectFetchBtn').addEventListener('click', () => this.performPerfectFetch());
         document.getElementById('addSpecialDateBtn').addEventListener('click', () => this.showAddDialog());
         document.getElementById('viewScheduleBtn').addEventListener('click', () => this.showScheduleList());
     }
-
     async performPerfectFetch() {
         const fetchBtn = document.getElementById('perfectFetchBtn');
         const statusDiv = document.getElementById('fetchStatus');
-        
         fetchBtn.disabled = true;
         fetchBtn.textContent = '🔄 取得中...';
         statusDiv.innerHTML = '📡 公式サイトに接続し、最新の特別日程を確認しています...';
-        
         try {
             const result = await this.manager.fetchLatestSchedule();
             if (result && result.specialDates && result.specialDates.size > 0) {
@@ -846,7 +811,6 @@ class SpecialScheduleUI {
             setTimeout(() => { statusDiv.innerHTML = ''; }, 10000);
         }
     }
-
     showAddDialog() {
         const dialog = document.createElement('div');
         dialog.className = 'special-date-dialog';
@@ -877,15 +841,12 @@ class SpecialScheduleUI {
             dialog.remove();
         };
     }
-
     addSpecialDate() {
         const dateInput = document.getElementById('specialDate');
         const checkboxes = document.querySelectorAll('.checkbox-group input:checked');
         if (!dateInput.value) { alert('日付を選択してください'); return; }
-
         let types = [];
         const isNone = Array.from(checkboxes).some(cb => cb.value === 'none');
-        
         if (!isNone) {
             checkboxes.forEach(cb => {
                 const typeMap = {
@@ -897,17 +858,14 @@ class SpecialScheduleUI {
                 if(typeMap[cb.value]) types.push(typeMap[cb.value]);
             });
         }
-        
         this.manager.setSpecialDate(dateInput.value, types, '手動設定');
         updateSpecialScheduleDisplay();
         notificationManager.updateSpecialDatesInServiceWorker();
         alert('特別日程を追加しました');
     }
-
     showScheduleList() {
         const allDates = this.manager.getAllSpecialDates().sort((a, b) => new Date(a.date) - new Date(b.date));
         if (allDates.length === 0) { alert('登録されている特別日程はありません'); return; }
-
         const dialog = document.createElement('div');
         dialog.className = 'schedule-list-dialog';
         dialog.innerHTML = `
@@ -948,19 +906,20 @@ class SpecialScheduleUI {
     }
 }
 
-
 // ---------------------------------------------------------------------------------
 // 7. アプリケーションの初期化
 // ---------------------------------------------------------------------------------
 let specialScheduleManager;
 let specialScheduleUI;
 let notificationManager;
-let googleCalendarManager; // ★★★ 変数を追加 ★★★
+let googleCalendarManager;
+let iCalendarManager; // ★★★ 変数を追加 ★★★
 
 document.addEventListener('DOMContentLoaded', () => {
     specialScheduleManager = new SpecialScheduleManager();
     specialScheduleUI = new SpecialScheduleUI(specialScheduleManager);
-    googleCalendarManager = new GoogleCalendarManager(); // ★★★ インスタンスを生成 ★★★
+    googleCalendarManager = new GoogleCalendarManager();
+    iCalendarManager = new iCalendarManager(); // ★★★ インスタンスを生成 ★★★
     
     const pwaManager = new PWAManager();
     notificationManager = new NotificationManager();
@@ -968,11 +927,28 @@ document.addEventListener('DOMContentLoaded', () => {
     updateCalendar();
     setInterval(updateCalendar, 60000);
     
+    // ★★★ 月間カレンダーの初期化とイベントリスナー設定 ★★★
+    const monthInput = document.getElementById('calendarMonth');
+    const downloadBtn = document.getElementById('downloadIcsButton');
+
+    // 月選択インプットに現在の月を設定
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    monthInput.value = `${year}-${month}`;
+
+    // ダウンロードボタンのクリックイベント
+    downloadBtn.addEventListener('click', () => {
+        const [selectedYear, selectedMonth] = monthInput.value.split('-').map(Number);
+        // monthは0-11で扱うため、1を引く
+        iCalendarManager.triggerDownload(selectedYear, selectedMonth - 1);
+    });
+    // ★★★ 初期化ここまで ★★★
+
     // 月1回の自動チェック機能
     try {
         const lastFetchTimestamp = localStorage.getItem('lastSuccessfulFetch');
         const oneMonthInMs = 30 * 24 * 60 * 60 * 1000;
-        
         if (!lastFetchTimestamp || (Date.now() - parseInt(lastFetchTimestamp)) > oneMonthInMs) {
             console.log('最終取得から1ヶ月以上経過したため、自動更新を開始します。');
             setTimeout(() => {
