@@ -1,7 +1,7 @@
 // =================================================================================
-// Service Worker for Garbage Calendar (v7 - Phase 2 Refactor - Complete)
+// Service Worker for Garbage Calendar (v7.1 - Bug Fix - Complete)
 // =================================================================================
-const CACHE_NAME = 'garbage-calendar-v12';
+const CACHE_NAME = 'garbage-calendar-v13';
 const REPO_NAME = '/arida-garbage-calendar/';
 const urlsToCache = [
   REPO_NAME,
@@ -19,7 +19,6 @@ const urlsToCache = [
 // ---------------------------------------------------------------------------------
 class UnifiedDataStore {
     constructor() {
-        this.storageType = 'indexeddb';
         this.cache = new Map();
         this.dbPromise = this.getDB();
     }
@@ -80,10 +79,8 @@ class NotificationScheduler {
     }
 
     async schedule() {
-        if (this.isScheduling) {
-            console.log('SW: Already scheduling, skipping duplicate call');
-            return;
-        }
+        if (this.isScheduling) return;
+        
         this.isScheduling = true;
         const currentScheduleId = ++this.scheduleId;
 
@@ -92,7 +89,6 @@ class NotificationScheduler {
             
             const isEnabled = await dataStore.get('notificationEnabled', false);
             if (!isEnabled) {
-                console.log('SW: Notifications disabled.');
                 await dataStore.set('schedulerState', null);
                 return;
             }
@@ -109,7 +105,6 @@ class NotificationScheduler {
             });
 
             this.timerId = setTimeout(() => this.handleNotificationTime(currentScheduleId), delay);
-            console.log(`SW: Notification scheduled for: ${nextTime.toLocaleString('ja-JP')}`);
         } catch (error) {
             console.error('SW: Failed to schedule notification:', error);
             this.timerId = setTimeout(() => this.schedule(), 24 * 60 * 60 * 1000);
@@ -126,7 +121,7 @@ class NotificationScheduler {
     calculateNextNotificationTime(timeString) {
         try {
             const timeRegex = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
-            if (!timeRegex.test(timeString)) throw new Error();
+            if (!timeRegex.test(timeString)) throw new Error('Invalid time format');
             const [hours, minutes] = timeString.split(':').map(Number);
             let nextTime = new Date();
             nextTime.setHours(hours, minutes, 0, 0);
@@ -137,32 +132,23 @@ class NotificationScheduler {
         } catch {
             let nextTime = new Date();
             nextTime.setHours(7, 0, 0, 0);
-            if (new Date() >= nextTime) {
-                nextTime.setDate(nextTime.getDate() + 1);
-            }
+            if (new Date() >= nextTime) nextTime.setDate(nextTime.getDate() + 1);
             return nextTime;
         }
     }
     
     async handleNotificationTime(scheduleId) {
         const state = await dataStore.get('schedulerState');
-        if (!state || scheduleId !== state.scheduleId) {
-            console.log('SW: Ignoring outdated timer execution.');
-            return;
-        }
+        if (!state || scheduleId !== state.scheduleId) return;
 
         try {
             await this.performDailyCheck();
-        } catch(error) {
-            console.error("SW: Error during daily check:", error);
-        }
-        finally {
+        } finally {
             setTimeout(() => this.schedule(), 1000);
         }
     }
     
     async performDailyCheck() {
-        console.log('SW: Performing daily garbage check...');
         const specialDatesData = await dataStore.get('specialDates', {});
         const specialDates = new Map(Object.entries(specialDatesData || {}));
         const todayGarbage = getTodayGarbageWithSpecialSchedule(new Date(), specialDates);
@@ -188,7 +174,6 @@ class NotificationScheduler {
             if (state && state.nextTime) {
                 const nextTime = new Date(state.nextTime);
                 if (nextTime > new Date()) {
-                    console.log('SW: Restoring scheduler state from crash.');
                     this.scheduleId = state.scheduleId || 0;
                     const delay = nextTime.getTime() - Date.now();
                     this.timerId = setTimeout(() => this.handleNotificationTime(this.scheduleId), delay);
@@ -217,12 +202,11 @@ self.addEventListener('activate', (event) => {
         caches.keys().then(cacheNames => Promise.all(
             cacheNames.filter(name => name !== CACHE_NAME).map(name => caches.delete(name))
         )).then(async () => {
-            console.log('SW: Activated');
+            await self.clients.claim();
             const restored = await scheduler.restoreFromCrash();
             if (!restored) {
                 scheduler.schedule();
             }
-            return self.clients.claim();
         })
     );
 });
@@ -238,23 +222,14 @@ self.addEventListener('message', async (event) => {
   const data = event.data;
   switch(data.type) {
     case 'SCHEDULE_DAILY_CHECK':
-        await dataStore.set('notificationEnabled', data.enabled);
-        await dataStore.set('notificationTime', data.time);
+        // 設定はDATA_SYNCで送られてくるので、ここではスケジュールをトリガーするだけ
         await scheduler.schedule();
-        break;
-    case 'UPDATE_SPECIAL_DATES':
-        await dataStore.set('specialDates', data.specialDates);
         break;
     case 'DATA_SYNC':
         dataStore.cache.set(data.key, data.value);
         if (data.key === 'notificationEnabled' || data.key === 'notificationTime') {
             await scheduler.schedule();
         }
-        break;
-    case 'TEST_NOTIFICATION':
-        const title = '🗑️ テスト通知';
-        const body = '✅ 通知は正常に設定されています！';
-        await self.registration.showNotification(title, createNotificationOptions(body, 'test-notification'));
         break;
   }
 });
@@ -274,13 +249,15 @@ self.addEventListener('notificationclick', (event) => {
 // ---------------------------------------------------------------------------------
 // Helper Functions
 // ---------------------------------------------------------------------------------
+
+/**
+ * ✅ 修正: 最初に正常動作していたロジックに戻し、script.jsと完全に一致させる (Bug Fix)
+ */
 function getWeekOfMonth(date) {
-    if (!(date instanceof Date) || isNaN(date.getTime())) throw new Error('Invalid date provided');
-    const year = date.getFullYear(), month = date.getMonth(), day = date.getDate();
-    const firstDay = new Date(year, month, 1);
-    const firstDayOfWeek = firstDay.getDay();
-    const adjustedFirstDay = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
-    return Math.floor((day - 1 + adjustedFirstDay) / 7) + 1;
+    const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+    const firstWeekday = firstDay.getDay();
+    const offsetDate = date.getDate() + firstWeekday - 1;
+    return Math.floor(offsetDate / 7) + 1;
 }
 
 function getSpecialSchedule(date, specialDates) {
@@ -297,7 +274,14 @@ function getTodayGarbageWithSpecialSchedule(date, specialDates) {
   const weekOfMonth = getWeekOfMonth(date);
   const garbage = [];
 
-  if ([2, 5].includes(dayOfWeek)) garbage.push({ name: '可燃ごみ' });
+  const garbageSchedule = {
+    burnable: [2, 5], 
+    bottlesPlastic: [3],
+    cansMetal: [3], 
+    petBottles: [4]
+  };
+
+  if (garbageSchedule.burnable.includes(dayOfWeek)) garbage.push({ name: '可燃ごみ' });
   if (dayOfWeek === 3 && [1, 3, 5].includes(weekOfMonth)) garbage.push({ name: 'びん類・プラスチック類' });
   if (dayOfWeek === 3 && [2, 4].includes(weekOfMonth)) garbage.push({ name: '缶・金属類・その他' });
   if (dayOfWeek === 4 && [2, 4].includes(weekOfMonth)) garbage.push({ name: 'ペットボトル' });
